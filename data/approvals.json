@@ -1,0 +1,34 @@
+[
+  {
+    "id": "AP-003",
+    "title": "社媒发帖/回复：帮我在推特发一条宠物饮水机新品推广帖",
+    "command": "帮我在推特发一条宠物饮水机新品推广帖",
+    "action": "social_post",
+    "draft": "收到。这是**对外动作（发帖）**，按流程我不会直接执行，先出执行方案供你审批。\n\n---\n\n## 📋 推特新品推广帖 · 执行方案\n\n### 一、内容草稿（英文，推特风格）\n\n**主帖（推荐）：**\n\n> 🐾 Fresh water, happy fur babies! 💧\n> \n> Meet our NEW smart pet water fountain:\n> \n> ⚡ Wireless pump — 2s assembly, easy clean\n> 🔇 Whisper-quiet (<30dB) — no more night noise\n> 🛡️ 4-stage filtration + UV sterilization\n> 🫙 2.5L large capacity — up to 7 days per fill\n> 👀 Transparent window — see water level at a glance\n> \n> Keep your cat hydrated & healthy all day. They deserve it! ❤️\n> \n> 👉 Link in bio\n> \n> #PetWaterFountain #CatsofTwitter #DogsofTwitter #PetCare #SmartPet #NewArrival\n\n**备选短版（预算紧/纯图推时用）：**\n\n> New pet water fountain just dropped 💧🐾\n> Ultra-quiet · 2.5L · UV filtration · easy-clean wireless pump\n> Because thirsty cats are happy cats. Link in bio 👉\n> #PetWaterFountain #CatsofTwitter\n\n### 二、配套素材建议（发布前需备齐）\n1. 主图 1 张：产品实拍白底图（或宠物使用场景图，点击率更高）\n2. 轮播图 2–4 张：卖点分解图（静音、过滤、容量、拆洗）\n3. 可选：15–30 秒猫喝水实拍短视频（完播率比图片高 3 倍左右）\n4. 所有图片建议加 alt text（无障碍描述，利于算法推荐）\n\n### 三、发布参数\n| 项目 | 建议 |\n|---|---|\n| 目标平台 | Twitter/X |\n| 发布账号 | 需你确认使用哪个品牌号 |\n| 最佳时间 | 美东 9:00–11:00 / 20:00–22:00（对应京时 21:00–23:00 / 次日 8:00–10:00） |\n| 首推形式 | 图文轮播 + 短链（建议用 bit.ly 等带追踪的短链） |\n\n### 四、风险提示 ⚠️\n1. **合规**：避免\"100% 杀菌/绝对安全\"等绝对化表述（美国 FTC 对夸大功效有处罚先例），草稿已用\"UV sterilization\"中性表述；若宣传\"医疗级\"需有检测认证背书。\n2. **素材版权**：产品图/视频需确认自有版权或已授权，避免用网图。\n3. **链接安全**：短链需提前测试跳转；评论区可预埋 FAQ（价格、适用猫狗品种、噪音实测）。\n4. **回复管理**：发布后 1 小时内建议盯评论，负面/问价及时回，避免差评沉淀。\n5. **信息核对**：以上卖点（2.5L、<30dB、7 天续航等）按行业常见参数写的，**发布前请用真实参数核对替换**，别发错数据。\n\n---\n\n**审批确认后告诉我：**\n1. 用哪个品牌账号发？\n2. 参数是否需要按实际产品修正？\n3. 主图/轮播图素材你提供，还是需要我先出图？\n\n确认后我再出最终可发布版本（含 alt text 和配图清单）。",
+    "status": "rejected",
+    "createdAt": "2026-07-31T07:46:28.206Z",
+    "risk": "对外动作，需人工确认后执行",
+    "decidedAt": "2026-07-31T08:28:19.546Z"
+  },
+  {
+    "id": "AP-002",
+    "title": "社媒发帖/回复：帮我在推特发一条新品推广帖",
+    "command": "帮我在推特发一条新品推广帖",
+    "action": "social_post",
+    "draft": "发推属于对外动作，我不会直接执行，先给你出执行方案。但目前缺关键信息，写不出精准文案——需要你补充：\n\n**需要你提供：**\n1. **产品名/类目**：卖什么？（品名、一句话卖点）\n2. **上线信息**：价格、首发优惠（折扣码/限时价）、购买链接\n3. **素材**：产品图/视频（推特有图转化率高很多）\n4. **账号**：发在哪个号？英文还是中文文案？（跨境出海默认英文）\n5. **目标受众**：B2C 消费者还是 B2B 批发/代理？\n\n---\n\n先给你一版**通用英文模板草稿**（拿到产品信息后我马上替换成正式版）：\n\n> 🚀 NEW PRODUCT ALERT! We're excited to launch **[Product Name]** — **[核心卖点，如: the lightweight, waterproof solution for X]**.\n>\n> ✨ Why you'll love it:\n> • [卖点1]\n> • [卖点2]\n> • [卖点3]\n>\n> 🎉 Launch special: **[折扣/优惠]** — only until [日期]!\n> 🔗 Shop now: [链接]\n>\n> #新品 #NewProduct #[相关话题标签]\n\n**执行方案：**\n- **目标平台**：Twitter/X\n- **内容**：上图 + 文案（上面模板），建议配 1 张主视觉图 + 1 张使用场景图\n- **发布时间**：建议美东时间 9:00–11:00 或 20:00–22:00（对应北京时间 21:00–23:00 / 次日 8:00–10:00）\n- **发布后动作**：回复置顶、@相关 KOL/媒体账号增加曝光\n- **风险提示**：① 新号直接发营销帖容易被限流，建议先养号互动；② 链接域名注意安全（避免被标记垃圾链接）；③ 素材别用未授权图片，避免版权投诉\n\n把产品信息发我，我出正式定稿。",
+    "status": "approved",
+    "createdAt": "2026-07-31T07:05:29.293Z",
+    "risk": "对外动作，需人工确认后执行",
+    "decidedAt": "2026-07-31T07:05:29.334Z"
+  },
+  {
+    "id": "AP-001",
+    "title": "社媒发帖/回复：帮我在推特发一条新品推广帖，内容是宠物饮水机新品上市",
+    "command": "帮我在推特发一条新品推广帖，内容是宠物饮水机新品上市",
+    "action": "social_post",
+    "draft": "# 📋 新品推广帖执行方案（待审批）\n\n**⚠️ 说明：** 发帖属于对外动作，我不会直接执行。以下为完整方案，确认后我再安排发布。\n\n---\n\n## 🎯 目标平台\n- **Twitter（X）** @品牌账号\n- **发布时间建议：** 北京时间 21:00–23:00（美东 9:00–11:00，宠物用品目标客群活跃时段）\n- **配图：** 产品主图 1 张（16:9）+ 使用场景图 1 张（宠物喝水实拍），或 3 图轮播\n\n---\n\n## 📝 内容草稿（主推版）\n\n> 💧 **Meet the purr-fect way to keep your pet hydrated!**\n>\n> Our NEW Smart Pet Water Fountain is here:\n> 🐾 2.5L large capacity — fresh water for days\n> 🔇 Ultra-quiet pump (<30dB), sleep-friendly\n> 🧼 Easy-clean, BPA-free design\n> 💡 LED water level indicator + filter reminder\n>\n> Hydration = health. Your furry friend deserves better than stale bowl water.\n>\n> 🎉 **Launch sale: 20% OFF + free shipping**\n> 👉 [产品链接]\n>\n> #PetCare #PetFountain #NewProduct #CatMom #DogDad #PetLovers\n\n---\n\n## 🔄 备选版本（风格差异化）\n\n**版本 B（幽默风）：**\n> My cat has 3 opinions about this fountain: 💧😾💧\n> (Spoiler: he now refuses to drink anywhere else)\n> New 2.5L smart pet fountain — quiet pump, easy clean, fresh water always. Launch special: 20% off!\n> [链接] #PetFountain #CatsOfTwitter\n\n**版本 C（痛点向，适合配合视频）：**\n> Does your pet ignore their water bowl? 😬\n> Stale water + noisy pumps = dehydrated pets.\n> Our NEW fountain solves both: ultra-quiet motor + triple filtration keeps water fresh & flowing 24/7. Your pet will actually *drink more* — that's the whole point. 💙\n> [链接] #PetHealth #NewProductLaunch\n\n---\n\n## ⚠️ 风险提示\n\n1. **平台合规：** 确认产品无 FDA 类医疗宣称风险——避免使用 \"cures/prevents disease\" 等词，草稿中已规避 ✅\n2. **落地页检查：** 发布前请确认链接可访问、折扣码真实有效，避免\"货不对板\"引发差评\n3. **素材版权：** 配图需为实拍或自有版权素材，勿用网图\n4. **预期管理：** 新账号冷启动自然流量有限，建议同步：\n   - 转发到相关宠物话题社区（如 #PetTwitter 圈层）\n   - 首周配合 2–3 条互动帖（抽奖/问答）加热度\n\n---\n\n**需要我调整方向吗？** 例如：\n- 换成中文/其他语言版本\n- 调整卖点优先级（价格→颜值→功能）\n- 生成配图草稿\n- 确认后回复「发布」，我再输出最终发布清单（含精确时间、话题标签、配图清单）供你人工执行 🚀",
+    "status": "pending",
+    "createdAt": "2026-07-31T06:57:14.773Z",
+    "risk": "对外动作，需人工确认后执行"
+  }
+]

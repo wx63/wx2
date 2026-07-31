@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 · OpenClaw 跨境全能运营矩阵</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="login.css" />
+</head>
+<body class="auth-body">
+  <div class="auth">
+    <!-- ============ 左侧品牌视觉区 ============ -->
+    <section class="auth-brand">
+      <div class="brand-bg-grid"></div>
+      <div class="brand-bg-glow"></div>
+
+      <div class="brand-top">
+        <div class="brand-logo">🦞</div>
+        <span class="brand-name">OpenClaw</span>
+      </div>
+
+      <div class="brand-content">
+        <h1 class="brand-headline">跨境全能<br/>运营矩阵</h1>
+        <p class="brand-sub">5 名 AI 数字员工协同作战，把碎片化工具串成全自动业务闭环。</p>
+
+        <ul class="brand-features">
+          <li><span class="bf-icon">🔍</span><div><b>市场调研</b><span>VOC 分析 · 竞品抓取 · 趋势预测</span></div></li>
+          <li><span class="bf-icon">🎨</span><div><b>内容与视觉</b><span>多语种 Listing · SEO · 爆款脚本</span></div></li>
+          <li><span class="bf-icon">📣</span><div><b>获客与社媒</b><span>矩阵发帖 · 互动种草 · 线索抓取</span></div></li>
+          <li><span class="bf-icon">💬</span><div><b>客服与订单</b><span>7×24 接待 · 查单 · 线索清洗</span></div></li>
+          <li><span class="bf-icon">🛡️</span><div><b>合规与风控</b><span>侵权拦截 · 敏感词审查</span></div></li>
+        </ul>
+      </div>
+
+      <div class="brand-stats">
+        <div class="bs-item"><b>25+</b><span>接入渠道</span></div>
+        <div class="bs-item"><b>7×24</b><span>在线运营</span></div>
+        <div class="bs-item"><b>5</b><span>数字员工</span></div>
+      </div>
+    </section>
+
+    <!-- ============ 右侧表单区 ============ -->
+    <section class="auth-form-wrap">
+      <div class="auth-form">
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-mode="login">登录</button>
+          <button class="auth-tab" data-mode="register">注册</button>
+          <span class="auth-tab-underline" id="tabUnderline"></span>
+        </div>
+
+        <!-- 登录表单 -->
+        <form class="form-panel active" id="loginForm" novalidate>
+          <h2 class="form-title">欢迎回来</h2>
+          <p class="form-sub">登录进入运营矩阵控制台</p>
+
+          <label class="field">
+            <span class="field-label">邮箱</span>
+            <div class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+              <input type="email" name="email" placeholder="you@company.com" autocomplete="email" required />
+            </div>
+            <span class="field-error"></span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">密码</span>
+            <div class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              <input type="password" name="password" placeholder="至少 8 位" autocomplete="current-password" required />
+              <button type="button" class="toggle-pwd" tabindex="-1" aria-label="显示密码">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+            <span class="field-error"></span>
+          </label>
+
+          <div class="form-row">
+            <label class="checkbox">
+              <input type="checkbox" name="remember" />
+              <span class="check-box"></span>
+              <span>记住我</span>
+            </label>
+            <a class="link" href="#">忘记密码？</a>
+          </div>
+
+          <button type="submit" class="btn-primary btn-block">登录</button>
+
+          <div class="divider"><span>或使用</span></div>
+
+          <div class="oauth-row">
+            <button type="button" class="oauth-btn" data-provider="google">
+              <svg viewBox="0 0 24 24"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.4-1.7 4.1-5.5 4.1-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.9 3.4 14.7 2.5 12 2.5 6.9 2.5 2.8 6.6 2.8 11.8S6.9 21 12 21c5.4 0 9-3.8 9-9.1 0-.6-.1-1.1-.2-1.6H12Z"/></svg>
+              <span>Google</span>
+            </button>
+            <button type="button" class="oauth-btn" data-provider="github">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.3c0 4.5 2.9 8.3 6.8 9.7.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.4-3.4-1.4-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.3 9.3 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5 3.9-1.4 6.8-5.2 6.8-9.7C22 6.6 17.5 2 12 2Z"/></svg>
+              <span>GitHub</span>
+            </button>
+          </div>
+        </form>
+
+        <!-- 注册表单 -->
+        <form class="form-panel" id="registerForm" novalidate>
+          <h2 class="form-title">创建账号</h2>
+          <p class="form-sub">部署你的第一个跨境 AI 团队</p>
+
+          <label class="field">
+            <span class="field-label">姓名</span>
+            <div class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+              <input type="text" name="name" placeholder="你的称呼" autocomplete="name" required />
+            </div>
+            <span class="field-error"></span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">邮箱</span>
+            <div class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+              <input type="email" name="email" placeholder="you@company.com" autocomplete="email" required />
+            </div>
+            <span class="field-error"></span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">密码</span>
+            <div class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              <input type="password" name="password" placeholder="至少 8 位" autocomplete="new-password" required />
+              <button type="button" class="toggle-pwd" tabindex="-1" aria-label="显示密码">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+            <div class="pwd-strength" id="pwdStrength"><div class="pwd-bar"></div><div class="pwd-bar"></div><div class="pwd-bar"></div></div>
+            <span class="field-error"></span>
+          </label>
+
+          <label class="checkbox terms">
+            <input type="checkbox" name="terms" required />
+            <span class="check-box"></span>
+            <span>我已阅读并同意 <a class="link" href="#">服务条款</a> 与 <a class="link" href="#">隐私政策</a></span>
+          </label>
+
+          <button type="submit" class="btn-primary btn-block">创建账号</button>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="login.js"></script>
+</body>
+</html>

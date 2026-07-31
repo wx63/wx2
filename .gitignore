@@ -1,0 +1,32 @@
+# ===== 依赖 =====
+server/node_modules/
+**/node_modules/
+
+# ===== 日志 / 运行时 =====
+*.log
+*.err.log
+server.log
+server.err.log
+
+# ===== 临时 / 校验脚本 =====
+.smoke.js
+.smoke-check.js
+.verify*.js
+verify*.js
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===== OpenClaw 本地配置（敏感：含 token）=====
+# 注意：openclaw.json 在 ~/.openclaw/ 下，本仓库不含；这里仅防误提交本地副本
+openclaw.json
+openclaw.json.bak*
+
+# ===== 运行时数据（按需保留或忽略）=====
+# 审批数据是业务产出，保留入库；如需清空可手动删
+# data/approvals.json
