@@ -27,8 +27,9 @@
     "command": "帮我在推特发一条新品推广帖，内容是宠物饮水机新品上市",
     "action": "social_post",
     "draft": "# 📋 新品推广帖执行方案（待审批）\n\n**⚠️ 说明：** 发帖属于对外动作，我不会直接执行。以下为完整方案，确认后我再安排发布。\n\n---\n\n## 🎯 目标平台\n- **Twitter（X）** @品牌账号\n- **发布时间建议：** 北京时间 21:00–23:00（美东 9:00–11:00，宠物用品目标客群活跃时段）\n- **配图：** 产品主图 1 张（16:9）+ 使用场景图 1 张（宠物喝水实拍），或 3 图轮播\n\n---\n\n## 📝 内容草稿（主推版）\n\n> 💧 **Meet the purr-fect way to keep your pet hydrated!**\n>\n> Our NEW Smart Pet Water Fountain is here:\n> 🐾 2.5L large capacity — fresh water for days\n> 🔇 Ultra-quiet pump (<30dB), sleep-friendly\n> 🧼 Easy-clean, BPA-free design\n> 💡 LED water level indicator + filter reminder\n>\n> Hydration = health. Your furry friend deserves better than stale bowl water.\n>\n> 🎉 **Launch sale: 20% OFF + free shipping**\n> 👉 [产品链接]\n>\n> #PetCare #PetFountain #NewProduct #CatMom #DogDad #PetLovers\n\n---\n\n## 🔄 备选版本（风格差异化）\n\n**版本 B（幽默风）：**\n> My cat has 3 opinions about this fountain: 💧😾💧\n> (Spoiler: he now refuses to drink anywhere else)\n> New 2.5L smart pet fountain — quiet pump, easy clean, fresh water always. Launch special: 20% off!\n> [链接] #PetFountain #CatsOfTwitter\n\n**版本 C（痛点向，适合配合视频）：**\n> Does your pet ignore their water bowl? 😬\n> Stale water + noisy pumps = dehydrated pets.\n> Our NEW fountain solves both: ultra-quiet motor + triple filtration keeps water fresh & flowing 24/7. Your pet will actually *drink more* — that's the whole point. 💙\n> [链接] #PetHealth #NewProductLaunch\n\n---\n\n## ⚠️ 风险提示\n\n1. **平台合规：** 确认产品无 FDA 类医疗宣称风险——避免使用 \"cures/prevents disease\" 等词，草稿中已规避 ✅\n2. **落地页检查：** 发布前请确认链接可访问、折扣码真实有效，避免\"货不对板\"引发差评\n3. **素材版权：** 配图需为实拍或自有版权素材，勿用网图\n4. **预期管理：** 新账号冷启动自然流量有限，建议同步：\n   - 转发到相关宠物话题社区（如 #PetTwitter 圈层）\n   - 首周配合 2–3 条互动帖（抽奖/问答）加热度\n\n---\n\n**需要我调整方向吗？** 例如：\n- 换成中文/其他语言版本\n- 调整卖点优先级（价格→颜值→功能）\n- 生成配图草稿\n- 确认后回复「发布」，我再输出最终发布清单（含精确时间、话题标签、配图清单）供你人工执行 🚀",
-    "status": "pending",
+    "status": "rejected",
     "createdAt": "2026-07-31T06:57:14.773Z",
-    "risk": "对外动作，需人工确认后执行"
+    "risk": "对外动作，需人工确认后执行",
+    "decidedAt": "2026-07-31T09:13:02.269Z"
   }
 ]

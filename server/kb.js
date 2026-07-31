@@ -54,6 +54,12 @@ const SYNONYMS = {
   '衣服': ['女装', '男装', '服装', '上衣'],
   '鞋': ['男鞋', '女鞋', '鞋类'],
   '尺码': ['女装', '男装', '鞋类', '宠物'],
+  '欧盟': ['欧盟', '跨境', '冷静期', '14天', '十四天'],
+  '退货': ['退货', '退换', '无理由', '冷静期', '14天'],
+  '退': ['退货', '退换'],
+  '物流': ['跨境', '物流', 'USPS', 'DHL', 'ePacket'],
+  '到货': ['物流', '跨境', '时效'],
+  '多久': ['时效', '物流', '跨境'],
 };
 
 function tokenize(q) {
@@ -94,7 +100,7 @@ function scoreChunk(chunk, tokens) {
 }
 
 function retrieve(question, k = 3) {
-  if (!CHUNKS.length) loadKnowledgeBase();
+  loadKnowledgeBase(); // 每次检索前重载，确保文档更新即时生效（文件小，成本可忽略）
   const tokens = tokenize(question);
   if (!tokens.length) return [];
   return CHUNKS
@@ -121,7 +127,9 @@ async function answer(question) {
   const prompt =
     `你是跨境电商客服。根据下方知识库片段回答客户问题。\n` +
     `要求：\n1. 先给结论，直接回答\n2. 关键信息后标注来源，格式「（来源：<文件名>·<章节>）」\n` +
-    `3. 知识库没有的明确说「建议转人工客服核实」，不编造价格/时效\n4. 只出答复草稿，不代替客户下单退货\n\n` +
+    `3. 知识库片段中已有的内容必须直接引用，特别是专项条款（如欧盟冷静期、跨境特别说明）优先于通用条款\n` +
+    `4. 只有知识库完全没有相关信息时才说「建议转人工客服核实」，不得遗漏已提供的片段内容\n` +
+    `5. 只出答复草稿，不代替客户下单退货\n\n` +
     `=== 知识库片段 ===\n${context}\n\n=== 客户问题 ===\n${question}`;
 
   const result = await runAgent(prompt, { agentId: 'main' });

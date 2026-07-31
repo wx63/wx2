@@ -47,7 +47,7 @@ function detectAction(cmd) {
 /**
  * 调用 OpenClaw Gateway 执行指令（真实执行）
  * @param {string} prompt  用户的指令
- * @param {object} opts    { sessionId?, agentId? }
+ * @param {object} opts    { sessionId?, agentId?, noTools? }
  * @returns {Promise<{ok: boolean, content: string, raw: object}>}
  */
 async function runAgent(prompt, opts = {}) {
@@ -59,34 +59,54 @@ async function runAgent(prompt, opts = {}) {
         role: 'system',
         content:
           '你是OpenClaw跨境运营平台的核心执行引擎（运营总监）。' +
-          '用户通过平台前端给你下达运营指令。请真实执行：分析、搜索、生成内容。' +
-          '重要：这是外部系统调用，不要输出任何解释性的开场白或"好的，我来帮你"之类的废话，' +
-          '直接给出任务结果。如果指令是"对外动作"（发帖/回复/上架/下单/退款），' +
-          '不要真的执行，而是输出一份执行方案（含内容草稿、目标平台、风险提示），等待人工审批。',
+          '用户通过平台前端给你下达运营指令。请直接基于你已有的行业知识与平台数据真实执行：分析、生成内容。' +
+          '重要规则：\n' +
+          '1. 这是外部系统调用，不要输出任何解释性的开场白或"好的，我来帮你"之类的废话，直接给出任务结果。\n' +
+          '2. 不要调用搜索或网页抓取工具（web_search/web_fetch），这些通道不稳定会拖慢响应；用你已有的知识回答即可。\n' +
+          '3. 如果指令是"对外动作"（发帖/回复/上架/下单/退款），不要真的执行，而是输出一份执行方案（含内容草稿、目标平台、风险提示），等待人工审批。',
       },
       { role: 'user', content: prompt },
     ],
     max_tokens: 2000,
+    // 降低推理强度：运营指令多为执行/生成类，不需要深度推理，可大幅降速
+    reasoning_effort: 'low',
+    // 禁用工具调用：避免 agent 自行触发 web_search/web_fetch 导致长时间挂起
+    tool_choice: 'none',
     stream: false,
   };
 
   if (opts.sessionId) body.session_id = opts.sessionId;
 
-  const resp = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${GATEWAY_TOKEN}`,
-    },
-    body: JSON.stringify(body),
-  });
+  // 60s 超时：避免前端干等到 undici 默认 headers timeout
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  try {
+    const resp = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        Authorization: `Bearer ${GATEWAY_TOKEN}`,
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
 
-  const raw = await resp.json();
-  if (!resp.ok) {
-    return { ok: false, error: raw.error?.message || `HTTP ${resp.status}`, raw };
+    const raw = await resp.json();
+    if (!resp.ok) {
+      return { ok: false, error: raw.error?.message || `HTTP ${resp.status}`, raw };
+    }
+    const content = raw.choices?.[0]?.message?.content || '';
+    // OpenClaw 在 agent 无法产出时会返回固定占位文，识别后转成错误便于前端降级
+    if (content.trim().startsWith('⚠️ Agent couldn\'t generate a response')) {
+      return { ok: false, error: 'Agent 暂时无法生成响应，请稍后重试', raw };
+    }
+    return { ok: true, content, raw };
+  } catch (e) {
+    const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
+    return { ok: false, error: aborted ? 'Gateway 响应超时（60s），请稍后重试或简化指令' : e.message };
+  } finally {
+    clearTimeout(timer);
   }
-  const content = raw.choices?.[0]?.message?.content || '';
-  return { ok: true, content, raw };
 }
 
 module.exports = { runAgent, detectAction, GATEWAY_URL };
