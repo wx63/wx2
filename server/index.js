@@ -13,14 +13,44 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 const { runAgent, detectAction } = require('./bridge');
-const { loadKnowledgeBase, retrieve, answer } = require('./kb');
+const { loadKnowledgeBase, retrieve, answer, fileStats } = require('./kb');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+
+// ---------- 知识库上传（multer） ----------
+const KB_DIR = path.join(__dirname, '..', '知识库');
+const KB_ALLOWED_EXT = new Set(['.md', '.txt', '.pdf', '.docx', '.xlsx', '.csv']);
+const KB_INDEXED_EXT = new Set(['.md', '.txt']); // 仅这两类进 RAG 索引
+
+const kbUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      if (!fs.existsSync(KB_DIR)) fs.mkdirSync(KB_DIR, { recursive: true });
+      cb(null, KB_DIR);
+    },
+    // 用 时间戳-原名 防重名，保留原扩展名
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      // multer 2.x 的 file.originalname 是 latin1（未按 UTF-8 解码），需先转回 UTF-8
+      let orig = file.originalname;
+      try { orig = Buffer.from(orig, 'latin1').toString('utf8'); } catch {}
+      const base = path.basename(orig, ext).replace(/[^\w一-龥.-]/g, '_');
+      cb(null, `${Date.now()}-${base}${ext}`);
+    },
+  }),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (KB_ALLOWED_EXT.has(ext)) cb(null, true);
+    else cb(new Error(`不支持的文件类型：${ext}`));
+  },
+});
 
 // ---------- 数据存储（内存 + 本地 JSON 文件持久化） ----------
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -76,18 +106,81 @@ app.get('/api/kb/retrieve', (req, res) => {
   res.json({ ok: true, chunks: chunks.map(c => ({ file: c.file, heading: c.heading, score: c.score, preview: c.content.slice(0, 120) })) });
 });
 
-// 知识库文件列表（供前端知识库页同步）
+// 知识库文件列表（供前端知识库页同步，含 indexed/chunks）
 app.get('/api/kb/files', (req, res) => {
-  const KB_DIR = path.join(__dirname, '..', '知识库');
   const files = [];
   try {
+    const stats = fileStats();
     for (const f of fs.readdirSync(KB_DIR)) {
-      if (!f.endsWith('.md')) continue;
+      const ext = path.extname(f).toLowerCase();
+      if (!KB_ALLOWED_EXT.has(ext)) continue;
       const stat = fs.statSync(path.join(KB_DIR, f));
-      files.push({ name: f, size: stat.size, mtime: stat.mtime.toISOString() });
+      const indexed = KB_INDEXED_EXT.has(ext);
+      files.push({
+        name: f,
+        size: stat.size,
+        mtime: stat.mtime.toISOString(),
+        indexed,
+        chunks: indexed ? (stats[f]?.chunks || 0) : 0,
+      });
     }
+    // 按修改时间倒序
+    files.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
   } catch (e) {}
-  res.json({ ok: true, files, chunkCount: (function(){ try { return loadKnowledgeBase().length; } catch { return 0; } })() });
+  const totalChunks = Object.values(fileStats()).reduce((s, v) => s + v.chunks, 0);
+  res.json({ ok: true, files, totalChunks });
+});
+
+// 知识库上传（multipart，落盘进 知识库/，md/txt 立即进索引）
+app.post('/api/kb/upload', (req, res) => {
+  kbUpload.array('files', 20)(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ ok: false, error: err.message || '上传失败' });
+    }
+    const saved = (req.files || []).map(f => {
+      const ext = path.extname(f.originalname).toLowerCase();
+      const indexed = KB_INDEXED_EXT.has(ext);
+      return {
+        name: f.filename,
+        originalName: f.originalname,
+        size: f.size,
+        mtime: new Date().toISOString(),
+        indexed,
+      };
+    });
+    if (saved.some(f => f.indexed)) loadKnowledgeBase(); // 有 md/txt 上传则重载索引
+    res.json({ ok: true, files: saved });
+  });
+});
+
+// 知识库删除（路径参数做安全校验，防目录穿越）
+app.delete('/api/kb/files/:name', (req, res) => {
+  let name;
+  try {
+    name = decodeURIComponent(req.params.name);
+  } catch {
+    return res.status(400).json({ ok: false, error: '非法文件名' });
+  }
+  // basename 后必须与原名一致（拒绝 a/b、../x）
+  const safe = path.basename(name);
+  if (!safe || safe !== name || safe.includes('\\') || safe.includes('/')) {
+    return res.status(400).json({ ok: false, error: '非法文件名' });
+  }
+  const ext = path.extname(safe).toLowerCase();
+  if (!KB_ALLOWED_EXT.has(ext)) {
+    return res.status(400).json({ ok: false, error: '不支持的文件类型' });
+  }
+  const full = path.join(KB_DIR, safe);
+  if (!fs.existsSync(full)) {
+    return res.status(404).json({ ok: false, error: '文件不存在' });
+  }
+  try {
+    fs.unlinkSync(full);
+    loadKnowledgeBase();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // 执行指令（核心）

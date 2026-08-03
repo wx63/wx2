@@ -9,7 +9,8 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^4.19.2",
-    "cors": "^2.8.5"
+    "multer": "^2.2.0"
   }
 }

@@ -565,6 +565,7 @@ function switchView(view, agentId) {
   if (view === "agent" && agentId != null) renderAgentDetail(agentId);
   if (view === "approval") { renderApprovals(); loadApprovalsFromServer(); }
   if (view === "leads") renderLeads();
+  if (view === "knowledge") loadKBFilesFromServer();
 }
 
 document.querySelectorAll(".nav-item").forEach((item) => {
@@ -932,27 +933,23 @@ function renderReports() {
 //  知识库（RAG）
 // ================================================================
 const KB_DOCS = [
-  { name: "尺码对照表_2024.xlsx", type: "xlsx", size: "24 KB", status: "ready", chunks: 8, color: "#34d399" },
-  { name: "退换货政策_v3.pdf", type: "pdf", size: "156 KB", status: "ready", chunks: 23, color: "#fb7185" },
-  { name: "FAQ_常见问题.docx", type: "docx", size: "82 KB", status: "ready", chunks: 15, color: "#60a5fa" },
-  { name: "产品目录_夏季.csv", type: "csv", size: "412 KB", status: "processing", progress: 64, chunks: 0, color: "#fbbf24" },
-  { name: "物流时效说明.md", type: "md", size: "18 KB", status: "ready", chunks: 6, color: "#a855f7" },
+  // 初始为空，启动后由 loadKBFilesFromServer() 从后端拉取真实文件覆盖
 ];
 
 const FILE_COLORS = { pdf: "#fb7185", docx: "#60a5fa", xlsx: "#34d399", csv: "#fbbf24", txt: "#7e85a3", md: "#a855f7" };
-const KB_STATUS = { ready: "已就绪", processing: "向量化中", failed: "失败" };
+const KB_STATUS = { ready: "已就绪", processing: "向量化中", failed: "失败", not_indexed: "未向量化", uploading: "上传中" };
 
 function initKnowledge() {
   const total = KB_DOCS.length;
   const ready = KB_DOCS.filter(d => d.status === "ready").length;
   const chunks = KB_DOCS.reduce((s, d) => s + (d.chunks || 0), 0);
-  const processing = KB_DOCS.filter(d => d.status === "processing").length;
+  const processing = KB_DOCS.filter(d => d.status === "uploading" || d.status === "processing").length;
 
   document.getElementById("kbStats").innerHTML = [
     { label: "文档总数", value: total, sub: "已上传", color: "var(--brand)" },
     { label: "已向量化", value: ready, sub: "可检索", color: "var(--success)" },
     { label: "文本块", value: chunks, sub: "chunks", color: "var(--info)" },
-    { label: "处理中", value: processing, sub: "向量化队列", color: "var(--warning)" },
+    { label: "处理中", value: processing, sub: "上传队列", color: "var(--warning)" },
   ].map(s => `
     <div class="kb-stat" style="--stat-color:${s.color}">
       <div class="kb-stat-label">${s.label}</div>
@@ -986,22 +983,44 @@ function initKnowledge() {
 }
 
 function addKBFiles(files) {
-  files.forEach(f => {
+  // 先把每个文件以「上传中」状态塞进列表，给用户即时反馈
+  const pending = files.map(f => {
     const ext = f.name.split(".").pop().toLowerCase();
-    KB_DOCS.unshift({
+    return {
       name: f.name,
       type: ext,
       size: f.size > 1048576 ? (f.size / 1048576).toFixed(1) + " MB" : (f.size / 1024).toFixed(0) + " KB",
-      status: "processing",
+      status: "uploading",
       progress: 0,
       chunks: 0,
       color: FILE_COLORS[ext] || "var(--brand)",
-    });
+      _file: f, // 暂存 File 对象，上传用
+    };
   });
+  KB_DOCS.unshift(...pending);
   renderKBList();
   initKnowledge();
-  showToast(`已添加 ${files.length} 个文档，开始向量化…`);
-  simulateVectorize();
+  showToast(`正在上传 ${files.length} 个文档…`);
+  uploadKBFiles(pending);
+}
+
+/** 真实上传：FormData POST /api/kb/upload，成功后用后端真相覆盖列表 */
+async function uploadKBFiles(pending) {
+  const fd = new FormData();
+  pending.forEach(d => fd.append("files", d._file));
+  try {
+    const resp = await fetch(`${API_BASE}/api/kb/upload`, { method: "POST", body: fd });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    showToast(`✅ 已上传 ${data.files.length} 个文档，md/txt 已进索引`);
+    await loadKBFilesFromServer();
+  } catch (e) {
+    // 失败：把这几条标为失败
+    pending.forEach(d => { d.status = "failed"; });
+    renderKBList();
+    initKnowledge();
+    showToast(`❌ 上传失败：${e.message}`);
+  }
 }
 
 function renderKBList() {
@@ -1010,22 +1029,26 @@ function renderKBList() {
     const color = FILE_COLORS[d.type] || d.color || "var(--brand)";
     const ext = d.type.toUpperCase().slice(0, 4);
     let right = "";
-    if (d.status === "processing") {
+    if (d.status === "uploading" || d.status === "processing") {
       right = `
-        <div class="kb-progress"><div class="kb-progress-bar" style="width:${d.progress || 0}%"></div></div>
-        <span class="kb-status-chip kb-status-processing">${d.progress || 0}%</span>
+        <span class="kb-status-chip kb-status-processing">${KB_STATUS.uploading || KB_STATUS.processing}</span>
       `;
+    } else if (d.status === "not_indexed") {
+      right = `<span class="kb-status-chip kb-status-failed">${KB_STATUS.not_indexed}</span>`;
     } else if (d.status === "ready") {
       right = `<span class="kb-status-chip kb-status-ready">${KB_STATUS.ready}</span>`;
     } else {
       right = `<span class="kb-status-chip kb-status-failed">${KB_STATUS.failed}</span>`;
     }
+    const meta = d.status === "uploading" ? `${d.size} · 上传中…`
+      : d.chunks ? `${d.size} · ${d.chunks} 块 · ${d.type.toUpperCase()}`
+      : `${d.size} · ${d.type.toUpperCase()}`;
     return `
       <li class="kb-item" data-i="${i}">
         <span class="kb-file-icon" style="--file-color:${color}">${ext}</span>
         <div class="kb-file-info">
           <div class="kb-file-name">${d.name}</div>
-          <div class="kb-file-meta">${d.size} · ${d.chunks ? d.chunks + " 块" : "处理中"} · ${d.type.toUpperCase()}</div>
+          <div class="kb-file-meta">${meta}</div>
         </div>
         ${right}
         <button class="kb-item-del" data-i="${i}" title="删除">
@@ -1036,19 +1059,32 @@ function renderKBList() {
   }).join("");
 
   list.querySelectorAll(".kb-item-del").forEach(btn => {
-    btn.addEventListener("click", (e) => {
+    btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const i = +btn.dataset.i;
       const name = KB_DOCS[i].name;
-      KB_DOCS.splice(i, 1);
+      // 立即从本地移除给出反馈，失败再恢复
+      const removed = KB_DOCS.splice(i, 1)[0];
       renderKBList();
       initKnowledge();
-      showToast(`已删除「${name}」`);
+      try {
+        const resp = await fetch(`${API_BASE}/api/kb/files/${encodeURIComponent(name)}`, { method: "DELETE" });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        showToast(`已删除「${name}」`);
+        await loadKBFilesFromServer();
+      } catch (e) {
+        KB_DOCS.splice(i, 0, removed); // 恢复
+        renderKBList();
+        initKnowledge();
+        showToast(`❌ 删除失败：${e.message}`);
+      }
     });
   });
 }
 
 function simulateVectorize() {
+  // 保留函数体（历史调用方可能引用），但真实上传走 uploadKBFiles，不再用此模拟
   const tick = setInterval(() => {
     let active = false;
     KB_DOCS.forEach(d => {
@@ -1069,6 +1105,30 @@ function simulateVectorize() {
       showToast("向量化完成，文档已可检索");
     }
   }, 600);
+}
+
+/** 从后端拉取真实知识库文件列表，覆盖本地 KB_DOCS */
+async function loadKBFilesFromServer() {
+  try {
+    const resp = await fetch(`${API_BASE}/api/kb/files`);
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    KB_DOCS.length = 0;
+    KB_DOCS.push(...(data.files || []).map(f => ({
+      name: f.name,
+      type: f.name.split(".").pop().toLowerCase(),
+      size: f.size > 1048576 ? (f.size / 1048576).toFixed(1) + " MB" : (f.size / 1024).toFixed(0) + " KB",
+      status: f.indexed ? "ready" : "not_indexed",
+      chunks: f.chunks || 0,
+      color: FILE_COLORS[f.name.split(".").pop().toLowerCase()] || "var(--brand)",
+    })));
+    renderKBList();
+    initKnowledge();
+    return KB_DOCS;
+  } catch (e) {
+    showToast(`⚠ 知识库文件列表拉取失败：${e.message}`);
+    return [];
+  }
 }
 
 // ================================================================
@@ -1439,5 +1499,7 @@ initSettings();
 startFeedStream();
 // 拉取后端真实审批数据（启动后异步，失败则降级为空）
 loadApprovalsFromServer();
+// 拉取后端真实知识库文件列表（覆盖空 KB_DOCS）
+loadKBFilesFromServer();
 // 每 30s 轮询一次审批数据，保证多端同步 & 徽标新鲜
 setInterval(() => { if (!document.hidden) loadApprovalsFromServer(); }, 30000);

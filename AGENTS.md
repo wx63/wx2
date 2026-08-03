@@ -49,5 +49,5 @@ D:\基于OpenClaw构建跨境电商智能体\
 - [ ] 客服闭环真实浏览器验收（Phase 1 收尾，jsdom 已过）
 - [ ] lead-scoring 技能（Phase 2）
 - [ ] listing-writer / compliance-check 技能（Phase 3）
-- [ ] 前端知识库页接后端真实文件列表
+- [x] 前端知识库页接后端真实文件列表（含上传/删除，md/txt 进 RAG）
 - [ ] OpenClaw 上云部署

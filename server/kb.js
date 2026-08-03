@@ -18,12 +18,28 @@ function loadKnowledgeBase() {
   CHUNKS = [];
   if (!fs.existsSync(KB_DIR)) return CHUNKS;
   for (const file of fs.readdirSync(KB_DIR)) {
-    if (!file.endsWith('.md')) continue;
+    // 只索引纯文本类：.md（按 ## 分块）与 .txt（整篇入索引）
+    if (!file.endsWith('.md') && !file.endsWith('.txt')) continue;
     const full = path.join(KB_DIR, file);
     const text = fs.readFileSync(full, 'utf-8');
     splitByHeading(file, text);
   }
   return CHUNKS;
+}
+
+/**
+ * 按文件聚合统计：{ [fileName]: { chunks, chars } }
+ * 供 /api/kb/files 标注每个文件是否已索引、块数。
+ */
+function fileStats() {
+  loadKnowledgeBase();
+  const map = {};
+  for (const c of CHUNKS) {
+    if (!map[c.file]) map[c.file] = { chunks: 0, chars: 0 };
+    map[c.file].chunks += 1;
+    map[c.file].chars += c.content.length;
+  }
+  return map;
 }
 
 function splitByHeading(file, text) {
@@ -143,4 +159,4 @@ async function answer(question) {
   };
 }
 
-module.exports = { loadKnowledgeBase, retrieve, answer, tokenize };
+module.exports = { loadKnowledgeBase, retrieve, answer, tokenize, fileStats };
