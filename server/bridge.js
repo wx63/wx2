@@ -77,9 +77,10 @@ async function runAgent(prompt, opts = {}) {
 
   if (opts.sessionId) body.session_id = opts.sessionId;
 
-  // 60s 超时：避免前端干等到 undici 默认 headers timeout
+  // 90s 超时：业务题（市场分析等）经 OpenClaw main agent 常需 25-40s，
+  // 偶发慢请求 50-80s；60s 太紧会误杀正常的长任务。
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 60000);
+  const timer = setTimeout(() => ctrl.abort(), 90000);
   try {
     const resp = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
       method: 'POST',
@@ -101,17 +102,21 @@ async function runAgent(prompt, opts = {}) {
       return { ok: false, error: raw.error?.message || `HTTP ${resp.status}`, raw };
     }
     const content = raw.choices?.[0]?.message?.content || '';
-    // OpenClaw 在 agent 无法产出时会返回固定占位文，识别后自动重试一次（偶发问题重试常能过）
-    if (content.trim().startsWith('⚠️ Agent couldn\'t generate a response')) {
-      if (opts._retry === undefined || opts._retry < 1) {
-        return runAgent(prompt, { ...opts, _retry: (opts._retry || 0) + 1 });
+    // OpenClaw 在 agent 无法产出时会返回固定占位文，识别后自动重试（最多 2 次）。
+    // 业务题偶发 non_deliverable_terminal_turn（模型 thinking 跑飞不产正文），
+    // 重试常能过；且占位文有时 50-80s 才返回，重试虽然慢但能拿到结果。
+    const PLACEHOLDER = '⚠️ Agent couldn\'t generate a response';
+    if (content.trim().startsWith(PLACEHOLDER)) {
+      const used = opts._retry || 0;
+      if (used < 2) {
+        return runAgent(prompt, { ...opts, _retry: used + 1 });
       }
-      return { ok: false, error: 'Agent 暂时无法生成响应，请稍后重试', raw };
+      return { ok: false, error: 'Agent 暂时无法生成响应，请稍后重试或换种问法', raw };
     }
     return { ok: true, content, raw };
   } catch (e) {
     const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
-    return { ok: false, error: aborted ? 'Gateway 响应超时（60s），请稍后重试或简化指令' : e.message };
+    return { ok: false, error: aborted ? 'Gateway 响应超时（90s），请稍后重试或简化指令' : e.message };
   } finally {
     clearTimeout(timer);
   }
