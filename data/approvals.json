@@ -1,5 +1,15 @@
 [
   {
+    "id": "AP-004",
+    "title": "社媒发帖/回复：帮我在Instagram发一条推广宠物饮水机的帖子",
+    "command": "帮我在Instagram发一条推广宠物饮水机的帖子",
+    "action": "social_post",
+    "draft": "# 📋 Instagram 宠物饮水机推广执行方案\n\n## 🔍 目标平台与策略定位\n- **平台**：Instagram（企业账号/创作者矩阵）\n- **内容形式**：图文轮播帖（Carousal）为主，备选 Reels 短视频（15s）\n- **受众画像**：25-40岁欧美/Z世代宠物主，关注宠物健康、居家效率、高颜值宠物用品\n- **核心卖点**：活水保鲜、三重过滤、超静音、大续航、安全防护\n- **转化路径**：IG动态 → 主页Bio短链 → 独立站商品页 → 结账（支持本地货币/ PayPal/ Apple Pay）\n\n---\n\n## 📝 内容草稿（可直接复制发布）\n\n### 🖼️ 轮播图结构建议（5张）\n| 卡片 | 画面建议 | 核心信息 |\n|------|----------|----------|\n| 1 | 高质感场景图：猫咪正从饮水机喝水，暖光/浅背景 | 标题+产品全貌 |\n| 2 | 剖面透视图：标注过滤层结构 | 三重净化原理 |\n| 3 | 夜间/书房场景：指针指向“≤30dB” | 静音不打扰 |\n| 4 | 出差背包+水壶旁摆放饮水机 | 7天续电/便携 |\n| 5 | 白底产品图+购买指引箭头 | CTA+限时赠品提示 |\n\n### 📄 Caption（英文为主，适配海外流量池）\n```text\n🐾 Fresh water, every sip. Meet your pet’s new hydration bestie.\nSay goodbye to stagnant bowls and hello to [Brand Name] Smart Pet Water Fountain.\n\n✅ 3-Stage Filtration: Charcoal + Antibacterial Cotton + Foam keeps water crisp & clean\n✅ Whisper-Silent Pump (<30dB): Night sips without the wake-up call\n✅ 7-Day Runtime / Large Tank: Perfect for busy schedules & short trips\n✅ IPX7 Waterproof + Dry-Burn Protection: Safety-first design you can trust\n\n🎁 LAUNCH OFFER: First 500 orders get FREE replacement filters + matching sip mat!\n👉 Tap link in bio to upgrade their daily routine.\n\n#PetWaterFountain #CatHydration #DogLife #SmartPetGear #CatMomVibes #PetWellness #PetTech #HealthyPets #CrossBorderPets #HomeAndPets\n```\n> 💡 中文备用版可提供，但海外IG默认推荐纯英/本地语言发布以提升互动权重。\n\n---\n\n## ⏱️ 发布节奏与标签策略\n- **最佳发布时间**（按北美西海岸/欧洲中部时区）：\n  - 工作日：19:00-21:00\n  - 周末：10:00-12:00 或 20:00-22:00\n- **Hashtag 配比**（IG算法偏好 12-18个精准词）：\n  - 头部泛词（3）：`#PetAccessories #PetLovers #DogAndCat`\n  - 垂类长尾（8）：`#CatWaterFountain #PetHydrationStation #SilentPetFountain #BPAFreePetGear #SmartPetHome`\n  - 场景/人群（4）：`#CatMom #PetSafetyFirst #ApartmentLivingWithPets`\n- **数据追踪**：启用 UTM 参数绑定 Bio 链接，监控 `Profile Visits / Click Rate / Add-to-Cart`\n\n---\n\n## ⚠️ 风险提示与合规要点\n1. **材质与安全宣称**：严禁使用“医疗级”“抗菌率99.9%”等无第三方检测报告支撑的绝对化表述。需在商品页或评论区置顶注明材质证书（BPA-Free / FDA接触级）。\n2. **广告披露**：若为KOC测评或达人置换素材，必须在首行或图片角标添加 `#Ad` 或 `Paid Partnership`，符合 FTC/ASA 规范。\n3. **文化敏感性**：避免使用捆绑、强迫饮水、幼宠单独出镜等易触发动物保护争议的构图；保持画面自然愉悦。\n4. **支付与物流预期**：落地页需明示预计送达时间（E.g., “Ships within 24h | Delivery: 5-8 business days”），避免 IG 购物车评分下降。\n5. **版权注意**：使用的BGM/字体/模板需确认商业授权，防止跨境下架。\n\n---\n\n🔹 **审批节点**：请确认上述文案、视觉清单、发布时间窗口及合规声明。审批通过后，系统将自动归档至 Instagram 内容日历，并生成对应 Ads Manager 追踪链接与落地页埋码。回复 `通过` 或提供修改意见即可推进。",
+    "status": "pending",
+    "createdAt": "2026-08-03T05:08:45.994Z",
+    "risk": "对外动作，需人工确认后执行"
+  },
+  {
     "id": "AP-003",
     "title": "社媒发帖/回复：帮我在推特发一条宠物饮水机新品推广帖",
     "command": "帮我在推特发一条宠物饮水机新品推广帖",

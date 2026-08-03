@@ -1,10 +1,15 @@
 /**
  * bridge.js — OpenClaw 桥接层
  *
- * 作用：把前端的指令转发给 OpenClaw Gateway 的 HTTP API（/v1/chat/completions），
- *       拿回真实执行结果。审批闸门的数据也在这里持久化。
+ * 作用：把前端的指令转发给模型 provider 执行，拿回真实结果。审批闸门的数据也在这里持久化。
  *
- * Gateway 地址/Token 从环境变量读取，未设置时自动从 openclaw.json 读取。
+ * 调用策略（2026-08-03 优化）：
+ *   快路径 = 直连模型 provider（shuyanai/qwen3.6-flash），绕过 OpenClaw Gateway。
+ *     实测 11-17s 出结果、5/5 成功；Gateway 路径要 26-56s 且 ~40% 失败
+ *     （main agent 16k 上下文开销 + 偶发 non_deliverable_terminal_turn）。
+ *   慢路径兜底 = 直连网络/HTTP 错误时，退回 OpenClaw Gateway（保留 agent 能力）。
+ *
+ * 配置从 ~/.openclaw/agents/main/agent/models.json 读，环境变量可覆盖。
  */
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +18,11 @@ const os = require('os');
 // ---------- 配置 ----------
 const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || 'http://127.0.0.1:18789';
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || readGatewayToken();
+
+// 快路径默认模型：非 reasoning、响应快、稳定。可用 env 覆盖。
+const DIRECT_MODEL = process.env.OPENCLAW_DIRECT_MODEL || 'shuyanai/qwen3.6-flash';
+const DIRECT_TIMEOUT_MS = +process.env.OPENCLAW_DIRECT_TIMEOUT_MS || 30000;
+const GATEWAY_TIMEOUT_MS = +process.env.OPENCLAW_GATEWAY_TIMEOUT_MS || 60000;
 
 function readGatewayToken() {
   try {
@@ -23,6 +33,28 @@ function readGatewayToken() {
     return '';
   }
 }
+
+/**
+ * 读 shuyanai provider 配置（baseUrl + apiKey），从 models.json。
+ * env 可覆盖：OPENCLAW_PROVIDER_BASE_URL / OPENCLAW_PROVIDER_API_KEY
+ */
+function readProviderConfig() {
+  const cfg = { baseUrl: process.env.OPENCLAW_PROVIDER_BASE_URL || '', apiKey: process.env.OPENCLAW_PROVIDER_API_KEY || '' };
+  if (cfg.baseUrl && cfg.apiKey) return cfg;
+  try {
+    const p = path.join(os.homedir(), '.openclaw', 'agents', 'main', 'agent', 'models.json');
+    const m = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    const sy = m.providers?.shuyanai || {};
+    return {
+      baseUrl: cfg.baseUrl || sy.baseUrl,
+      apiKey: cfg.apiKey || sy.apiKey,
+    };
+  } catch (e) {
+    return cfg;
+  }
+}
+
+const PROVIDER = readProviderConfig();
 
 // ---------- 对外动作规则（审批闸门判定） ----------
 // 与前端 app.js 的 ACTION_RULES 保持一致：命中即需要人工审批
@@ -44,43 +76,81 @@ function detectAction(cmd) {
   return null;
 }
 
+const SYSTEM_PROMPT =
+  '你是OpenClaw跨境运营平台的核心执行引擎（运营总监）。' +
+  '用户通过平台前端给你下达运营指令。请直接基于你已有的行业知识与平台数据真实执行：分析、生成内容。' +
+  '重要规则：\n' +
+  '1. 这是外部系统调用，不要输出任何解释性的开场白或"好的，我来帮你"之类的废话，直接给出任务结果。\n' +
+  '2. 不要调用搜索或网页抓取工具（web_search/web_fetch），用你已有的知识回答即可。\n' +
+  '3. 如果指令是"对外动作"（发帖/回复/上架/下单/退款），不要真的执行，而是输出一份执行方案（含内容草稿、目标平台、风险提示），等待人工审批。';
+
 /**
- * 调用 OpenClaw Gateway 执行指令（真实执行）
- * @param {string} prompt  用户的指令
- * @param {object} opts    { sessionId?, agentId?, noTools? }
- * @returns {Promise<{ok: boolean, content: string, raw: object}>}
+ * 快路径：直连模型 provider（绕过 OpenClaw Gateway）。
+ * 用非 reasoning 模型，无 agent 16k 上下文开销，实测 11-17s 稳定。
  */
-async function runAgent(prompt, opts = {}) {
+async function runDirect(prompt, opts = {}) {
+  // DIRECT_MODEL 形如 "shuyanai/qwen3.6-flash" → provider=shuyanai, modelId=qwen3.6-flash
+  const slash = DIRECT_MODEL.indexOf('/');
+  const modelId = slash >= 0 ? DIRECT_MODEL.slice(slash + 1) : DIRECT_MODEL;
+  const body = {
+    model: modelId,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: prompt },
+    ],
+    max_tokens: 2000,
+    stream: false,
+  };
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), DIRECT_TIMEOUT_MS);
+  try {
+    const resp = await fetch(`${PROVIDER.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        Authorization: `Bearer ${PROVIDER.apiKey}`,
+      },
+      body: Buffer.from(JSON.stringify(body), 'utf8'),
+      signal: ctrl.signal,
+    });
+    const raw = await resp.json();
+    if (!resp.ok) {
+      return { ok: false, error: raw.error?.message || raw.error || `HTTP ${resp.status}`, _fallbackable: resp.status >= 500 || resp.status === 429 };
+    }
+    const content = raw.choices?.[0]?.message?.content || '';
+    if (!content.trim()) {
+      return { ok: false, error: '模型未返回内容', _fallbackable: false };
+    }
+    return { ok: true, content, raw };
+  } catch (e) {
+    const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
+    return { ok: false, error: aborted ? `直连超时（${DIRECT_TIMEOUT_MS / 1000}s）` : e.message, _fallbackable: aborted || e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 慢路径兜底：经 OpenClaw Gateway（保留 agent 能力，但慢且偶发 non_deliverable）。
+ */
+async function runViaGateway(prompt, opts = {}) {
   const agentId = opts.agentId || 'main';
   const body = {
     model: `openclaw/${agentId}`,
     messages: [
-      {
-        role: 'system',
-        content:
-          '你是OpenClaw跨境运营平台的核心执行引擎（运营总监）。' +
-          '用户通过平台前端给你下达运营指令。请直接基于你已有的行业知识与平台数据真实执行：分析、生成内容。' +
-          '重要规则：\n' +
-          '1. 这是外部系统调用，不要输出任何解释性的开场白或"好的，我来帮你"之类的废话，直接给出任务结果。\n' +
-          '2. 不要调用搜索或网页抓取工具（web_search/web_fetch），这些通道不稳定会拖慢响应；用你已有的知识回答即可。\n' +
-          '3. 如果指令是"对外动作"（发帖/回复/上架/下单/退款），不要真的执行，而是输出一份执行方案（含内容草稿、目标平台、风险提示），等待人工审批。',
-      },
+      { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ],
     max_tokens: 2000,
-    // 降低推理强度：运营指令多为执行/生成类，不需要深度推理，可大幅降速
     reasoning_effort: 'low',
-    // 禁用工具调用：避免 agent 自行触发 web_search/web_fetch 导致长时间挂起
     tool_choice: 'none',
     stream: false,
   };
-
   if (opts.sessionId) body.session_id = opts.sessionId;
 
-  // 90s 超时：业务题（市场分析等）经 OpenClaw main agent 常需 25-40s，
-  // 偶发慢请求 50-80s；60s 太紧会误杀正常的长任务。
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 90000);
+  const timer = setTimeout(() => ctrl.abort(), GATEWAY_TIMEOUT_MS);
   try {
     const resp = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
       method: 'POST',
@@ -88,38 +158,49 @@ async function runAgent(prompt, opts = {}) {
         'Content-Type': 'application/json; charset=utf-8',
         Authorization: `Bearer ${GATEWAY_TOKEN}`,
       },
-      // 关键修复：用 Buffer 显式按 UTF-8 编码 body。
-      // Node fetch 对 string body 默认按 latin1 处理，中文会被损坏成乱码，
-      // 模型收到乱码后 thinking 卡在"解码乱码"上耗尽 token 仍不产出正文，
-      // 触发 OpenClaw 的 non_deliverable_terminal_turn（约 60% 失败率）。
-      // 改用 Buffer 后中文正常到达，失败率从 ~60% 降到 0（连测 5/5 + 业务题成功）。
+      // Buffer UTF-8：Node fetch 对 string body 默认 latin1，中文会乱码
+      // → 模型 thinking 卡在解码乱码 → non_deliverable_terminal_turn
       body: Buffer.from(JSON.stringify(body), 'utf8'),
       signal: ctrl.signal,
     });
-
     const raw = await resp.json();
     if (!resp.ok) {
       return { ok: false, error: raw.error?.message || `HTTP ${resp.status}`, raw };
     }
     const content = raw.choices?.[0]?.message?.content || '';
-    // OpenClaw 在 agent 无法产出时会返回固定占位文，识别后自动重试（最多 2 次）。
-    // 业务题偶发 non_deliverable_terminal_turn（模型 thinking 跑飞不产正文），
-    // 重试常能过；且占位文有时 50-80s 才返回，重试虽然慢但能拿到结果。
     const PLACEHOLDER = '⚠️ Agent couldn\'t generate a response';
     if (content.trim().startsWith(PLACEHOLDER)) {
       const used = opts._retry || 0;
-      if (used < 2) {
-        return runAgent(prompt, { ...opts, _retry: used + 1 });
+      if (used < 1) {
+        return runViaGateway(prompt, { ...opts, _retry: used + 1 });
       }
       return { ok: false, error: 'Agent 暂时无法生成响应，请稍后重试或换种问法', raw };
     }
     return { ok: true, content, raw };
   } catch (e) {
     const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
-    return { ok: false, error: aborted ? 'Gateway 响应超时（90s），请稍后重试或简化指令' : e.message };
+    return { ok: false, error: aborted ? `Gateway 响应超时（${GATEWAY_TIMEOUT_MS / 1000}s）` : e.message };
   } finally {
     clearTimeout(timer);
   }
 }
 
-module.exports = { runAgent, detectAction, GATEWAY_URL };
+/**
+ * 执行指令：快路径直连 → 失败兜底 Gateway。
+ * @param {string} prompt  用户的指令
+ * @param {object} opts    { sessionId?, agentId? }
+ * @returns {Promise<{ok: boolean, content: string, raw?: object, error?: string}>}
+ */
+async function runAgent(prompt, opts = {}) {
+  const direct = await runDirect(prompt, opts);
+  if (direct.ok) return direct;
+  // 直连失败且可兜底（网络/5xx/超时）→ 退回 Gateway
+  if (direct._fallbackable) {
+    const gw = await runViaGateway(prompt, opts);
+    if (gw.ok) return gw;
+    return { ok: false, error: `直连：${direct.error}；Gateway：${gw.error}` };
+  }
+  return direct;
+}
+
+module.exports = { runAgent, detectAction, GATEWAY_URL, DIRECT_MODEL };
