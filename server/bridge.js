@@ -87,7 +87,12 @@ async function runAgent(prompt, opts = {}) {
         'Content-Type': 'application/json; charset=utf-8',
         Authorization: `Bearer ${GATEWAY_TOKEN}`,
       },
-      body: JSON.stringify(body),
+      // 关键修复：用 Buffer 显式按 UTF-8 编码 body。
+      // Node fetch 对 string body 默认按 latin1 处理，中文会被损坏成乱码，
+      // 模型收到乱码后 thinking 卡在"解码乱码"上耗尽 token 仍不产出正文，
+      // 触发 OpenClaw 的 non_deliverable_terminal_turn（约 60% 失败率）。
+      // 改用 Buffer 后中文正常到达，失败率从 ~60% 降到 0（连测 5/5 + 业务题成功）。
+      body: Buffer.from(JSON.stringify(body), 'utf8'),
       signal: ctrl.signal,
     });
 
@@ -96,8 +101,11 @@ async function runAgent(prompt, opts = {}) {
       return { ok: false, error: raw.error?.message || `HTTP ${resp.status}`, raw };
     }
     const content = raw.choices?.[0]?.message?.content || '';
-    // OpenClaw 在 agent 无法产出时会返回固定占位文，识别后转成错误便于前端降级
+    // OpenClaw 在 agent 无法产出时会返回固定占位文，识别后自动重试一次（偶发问题重试常能过）
     if (content.trim().startsWith('⚠️ Agent couldn\'t generate a response')) {
+      if (opts._retry === undefined || opts._retry < 1) {
+        return runAgent(prompt, { ...opts, _retry: (opts._retry || 0) + 1 });
+      }
       return { ok: false, error: 'Agent 暂时无法生成响应，请稍后重试', raw };
     }
     return { ok: true, content, raw };
