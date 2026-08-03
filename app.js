@@ -251,17 +251,20 @@ function renderConsole() {
     </div>`;
     return;
   }
-  box.innerHTML = consoleState.steps.map((s, i) => `
+  box.innerHTML = consoleState.steps.map((s, i) => {
+    // 长产出（报告/分析/答复）加 long 类：内部滚动，完整可读，不截断不撑页
+    const isLong = typeof s.text === "string" && s.text.length > 280;
+    return `
     <div class="console-step ${s.done ? "done" : "active"}" style="--step-color:${s.color}">
       ${s.isApproval ? '<span class="console-gate">闸门</span>' : ""}
       <div class="cs-marker"></div>
       <div class="cs-body">
         <div class="cs-label"><span class="cs-tag" style="color:${s.color}">${s.tag}</span> ${s.label}</div>
-        <div class="cs-text">${s.text || '<span class="cs-typing">▌</span>'}</div>
+        <div class="cs-text${isLong ? " long" : ""}">${s.text || '<span class="cs-typing">▌</span>'}</div>
       </div>
       ${s.done ? '<span class="cs-check">✓</span>' : '<span class="cs-spinner"></span>'}
-    </div>
-  `).join("");
+    </div>`;
+  }).join("");
   box.scrollTop = box.scrollHeight;
 }
 
@@ -1409,8 +1412,8 @@ async function runCommand(cmd, opts = {}) {
       showToast(`⚡ 检测到对外动作，已生成审批条目 ${result.approval.id}`);
     }
 
-    // 最终产出：真实结果写入报告
-    push("产出", result.content.slice(0, 200) + (result.content.length > 200 ? "…" : ""), "结果", true);
+    // 最终产出：真实结果写入报告（完整内容，不截断）
+    push("产出", result.content, "结果", true);
     addReport({ agent: agentIdx, title: cmd.slice(0, 24) + (cmd.length > 24 ? "…" : ""), tag, color });
 
   } catch (e) {

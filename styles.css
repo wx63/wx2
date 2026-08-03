@@ -867,7 +867,18 @@ button { font-family: inherit; }
 .cs-body { flex: 1; min-width: 0; }
 .cs-label { font-size: 11px; color: var(--text-3); margin-bottom: 2px; }
 .cs-tag { font-weight: 600; margin-right: 6px; }
-.cs-text { color: var(--text-2); line-height: 1.55; word-break: break-word; }
+.cs-text { color: var(--text-2); line-height: 1.55; word-break: break-word; white-space: pre-wrap; }
+/* 长产出（报告/分析）折叠到固定高度，内部滚动，避免把整页撑开 */
+.cs-text.long {
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--bg-elev, rgba(0,0,0,0.03));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.7;
+}
 .cs-typing { animation: blink 0.9s steps(2) infinite; color: var(--brand); }
 @keyframes blink { 50% { opacity: 0; } }
 .cs-check { color: var(--success); font-size: 14px; margin-top: 2px; }
