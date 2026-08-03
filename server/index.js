@@ -16,11 +16,14 @@ const path = require('path');
 const multer = require('multer');
 const { runAgent, detectAction } = require('./bridge');
 const { loadKnowledgeBase, retrieve, answer, fileStats } = require('./kb');
+const { logCommand, recentCommands } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// CORS：同源（Express 托管静态）时可不配；file:// 打开 index.html 时需配 CORS_ORIGIN
+const corsOrigin = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : null;
+app.use(cors(corsOrigin ? { origin: corsOrigin } : undefined));
 app.use(express.json({ limit: '2mb' }));
 
 // ---------- 知识库上传（multer） ----------
@@ -190,14 +193,23 @@ app.post('/api/command', async (req, res) => {
     return res.status(400).json({ ok: false, error: '缺少 command 字段' });
   }
 
+  const startedAt = Date.now();
+  const meta = { command, agentId: agentId || 'main', sessionId };
   try {
     // 1. 检测是否对外动作（需要审批）
     const action = detectAction(command);
 
-    // 2. 调用 OpenClaw 真实执行
+    // 2. 调用模型执行（快路径直连 → 慢路径 Gateway 兜底）
     const result = await runAgent(command, { agentId, sessionId });
+    Object.assign(meta, result._meta || { path: 'unknown' });
+    meta.durationMs = Date.now() - startedAt;
+    meta.contentLen = (result.content || '').length;
+    meta.error = result.ok ? null : (result.error || '').split('；')[0]; // 脱敏：只存首段
+    meta.needsApproval = !!action;
 
     if (!result.ok) {
+      meta.status = 'error';
+      logCommand(meta); // 落库（即使失败也记，便于复盘）
       return res.status(502).json({ ok: false, error: result.error });
     }
 
@@ -218,7 +230,11 @@ app.post('/api/command', async (req, res) => {
       };
       approvals.unshift(approval);
       saveApprovals(approvals);
+      meta.approvalId = id;
     }
+
+    meta.status = 'ok';
+    logCommand(meta); // 落库
 
     res.json({
       ok: true,
@@ -228,8 +244,18 @@ app.post('/api/command', async (req, res) => {
     });
   } catch (e) {
     console.error('[command] error:', e);
-    res.status(500).json({ ok: false, error: e.message });
+    meta.durationMs = Date.now() - startedAt;
+    meta.status = 'error';
+    meta.error = '内部错误';
+    try { logCommand(meta); } catch {}
+    res.status(500).json({ ok: false, error: '内部错误，请稍后重试' }); // 脱敏：不把 e.message 抛给前端
   }
+});
+
+// 命令执行记录（调优复盘用：看走的哪条路 / 耗时 / token / 失败原因）
+app.get('/api/commands', (req, res) => {
+  const limit = Math.min(200, Math.max(1, +req.query.limit || 50));
+  res.json({ ok: true, data: recentCommands(limit) });
 });
 
 // 审批列表
@@ -237,7 +263,7 @@ app.get('/api/approvals', (req, res) => {
   res.json({ ok: true, data: loadApprovals() });
 });
 
-// 审批处理
+// 审批处理（批准草稿/驳回，仅归档，不真执行）
 app.post('/api/approvals/:id/decide', (req, res) => {
   const { id } = req.params;
   const { decision } = req.body || {}; // 'approve' | 'reject'
@@ -251,11 +277,39 @@ app.post('/api/approvals/:id/decide', (req, res) => {
   res.json({ ok: true, data: item });
 });
 
+// 真实执行（占位）：执行器未接入平台 API，当前只完成归档，明确告知未真执行
+app.post('/api/approvals/:id/execute', (req, res) => {
+  const { id } = req.params;
+  const approvals = loadApprovals();
+  const item = approvals.find(a => a.id === id);
+  if (!item) return res.status(404).json({ ok: false, error: '审批条目不存在' });
+  if (item.status !== 'approved') {
+    return res.status(400).json({ ok: false, error: '仅已批准草稿可执行' });
+  }
+  res.json({
+    ok: false,
+    executed: false,
+    error: '执行器未接入（Instagram/X/ERP 等平台 API 尚未对接），仅完成审批归档，未真实执行对外动作',
+    data: item,
+  });
+});
+
 // ---------- 启动 ----------
 loadKnowledgeBase(); // 预加载知识库分块
+
+// 托管前端静态文件（前后端同源，免去 CORS / file:// fetch 限制）
+const ROOT_DIR = path.join(__dirname, '..');
+app.use(express.static(ROOT_DIR, { index: 'index.html' }));
+// 兜底：非 /api 路径回退到 index.html（前端 SPA 式导航）
+app.get(/^\/(?!api\/).*/, (req, res, next) => {
+  res.sendFile(path.join(ROOT_DIR, 'index.html'), err => err && next());
+});
+
 app.listen(PORT, () => {
   console.log(`✅ AI跨境运营平台后端已启动: http://localhost:${PORT}`);
+  console.log(`   前端: http://localhost:${PORT}/ （同源，无需双击 index.html）`);
   console.log(`   Gateway: ${require('./bridge').GATEWAY_URL}`);
+  console.log(`   直连模型: ${require('./bridge').DIRECT_MODEL}`);
   console.log(`   审批数据: ${APPROVALS_FILE}`);
   console.log(`   知识库分块: ${loadKnowledgeBase().length} 块`);
 });

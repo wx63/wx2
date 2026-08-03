@@ -254,13 +254,17 @@ function renderConsole() {
   box.innerHTML = consoleState.steps.map((s, i) => {
     // 长产出（报告/分析/答复）加 long 类：内部滚动，完整可读，不截断不撑页
     const isLong = typeof s.text === "string" && s.text.length > 280;
+    // escapeHtml 防模型输出/用户输入污染页面（保留换行靠 CSS white-space: pre-wrap）
+    const textHtml = s.text
+      ? escapeHtml(s.text)
+      : '<span class="cs-typing">▌</span>';
     return `
     <div class="console-step ${s.done ? "done" : "active"}" style="--step-color:${s.color}">
       ${s.isApproval ? '<span class="console-gate">闸门</span>' : ""}
       <div class="cs-marker"></div>
       <div class="cs-body">
-        <div class="cs-label"><span class="cs-tag" style="color:${s.color}">${s.tag}</span> ${s.label}</div>
-        <div class="cs-text${isLong ? " long" : ""}">${s.text || '<span class="cs-typing">▌</span>'}</div>
+        <div class="cs-label"><span class="cs-tag" style="color:${s.color}">${escapeHtml(s.tag)}</span> ${escapeHtml(s.label)}</div>
+        <div class="cs-text${isLong ? " long" : ""}">${textHtml}</div>
       </div>
       ${s.done ? '<span class="cs-check">✓</span>' : '<span class="cs-spinner"></span>'}
     </div>`;
@@ -623,9 +627,9 @@ function renderFeed() {
   const feed = document.getElementById("activityFeed");
   feed.innerHTML = feedItems.map((f) => `
     <li style="--feed-color:${f.color}">
-      <span class="feed-time">${f.time}</span>
-      <span class="feed-tag">${f.tag}</span>
-      <span class="feed-text">${f.text}</span>
+      <span class="feed-time">${escapeHtml(f.time)}</span>
+      <span class="feed-tag">${escapeHtml(f.tag)}</span>
+      <span class="feed-text">${escapeHtml(f.text)}</span>
     </li>
   `).join("");
 }
@@ -690,7 +694,7 @@ function renderApprovals() {
   const history = APPROVALS.filter(a => a.status !== "pending");
   const stats = [
     { label: "待审批", value: pending.length, sub: "需人工确认", color: "var(--warning)" },
-    { label: "今日已批", value: APPROVALS.filter(a => a.status === "approved").length, sub: "已执行/已发送", color: "var(--success)" },
+    { label: "今日已批", value: APPROVALS.filter(a => a.status === "approved").length, sub: "草稿已归档", color: "var(--success)" },
     { label: "今日已驳", value: APPROVALS.filter(a => a.status === "rejected").length, sub: "已退回修改", color: "var(--danger)" },
     { label: "累计审批", value: APPROVALS.length, sub: "全部记录", color: "var(--brand)" },
   ];
@@ -724,7 +728,7 @@ function renderApprovals() {
           ${a.status === "pending" ? `
             <button class="btn btn-sm" data-act="view" data-id="${a.id}">查看草稿</button>
             <button class="btn btn-sm btn-reject" data-act="reject" data-id="${a.id}">驳回</button>
-            <button class="btn btn-sm btn-primary" data-act="approve" data-id="${a.id}">批准执行</button>
+            <button class="btn btn-sm btn-primary" data-act="approve" data-id="${a.id}">批准草稿</button>
           ` : `<span class="ap-status ap-${a.status}">${APPROVAL_STATUS[a.status]}</span>`}
         </div>
       </li>
@@ -761,7 +765,7 @@ async function decideApproval(ap, decision) {
   // 乐观更新
   ap.status = decision === "approve" ? "approved" : "rejected";
   const meta = APPROVAL_META[ap.type] || APPROVAL_META.reply;
-  pushFeed("审批", meta.color, `${decision === "approve" ? "批准" : "驳回"} ${meta.label}草稿 #${ap.id}，${decision === "approve" ? "已执行" : "退回修改"}`);
+  pushFeed("审批", meta.color, `${decision === "approve" ? "批准草稿" : "驳回"} ${meta.label}草稿 #${ap.id}，${decision === "approve" ? "已归档（执行器未接入）" : "退回修改"}`);
   renderApprovals();
   renderApprovalBadge();
   try {
@@ -775,7 +779,7 @@ async function decideApproval(ap, decision) {
     Object.assign(ap, data.data);
     renderApprovals();
     showToast(decision === "approve"
-      ? `✅ 已批准「${ap.title}」，已落库执行`
+      ? `✅ 已批准草稿「${ap.title}」，已归档（执行器尚未接入，未真实执行）`
       : `已驳回「${ap.title}」，退回修改`);
   } catch (e) {
     // 后端失败：本地回滚状态提示，但保留本地操作
@@ -810,7 +814,7 @@ function openApprovalDraft(ap) {
       <span class="hint">AI 只出方案，人工确认后执行</span>
       <div>
         <button class="btn btn-sm btn-reject" id="draftReject">驳回</button>
-        <button class="btn btn-sm btn-primary" id="draftApprove">批准执行</button>
+        <button class="btn btn-sm btn-primary" id="draftApprove">批准草稿</button>
       </div>
     </div>
   `;
@@ -861,17 +865,17 @@ function renderLeads() {
           const g = GRADE_META[l.grade];
           return `
             <tr>
-              <td class="lead-id">${l.id}</td>
-              <td>${l.channel}</td>
-              <td>${l.name}</td>
-              <td>${l.country}</td>
-              <td class="lead-msg">${l.msg}</td>
-              <td class="lead-intent">${l.intent}</td>
+              <td class="lead-id">${escapeHtml(l.id)}</td>
+              <td>${escapeHtml(l.channel)}</td>
+              <td>${escapeHtml(l.name)}</td>
+              <td>${escapeHtml(l.country)}</td>
+              <td class="lead-msg">${escapeHtml(l.msg)}</td>
+              <td class="lead-intent">${escapeHtml(l.intent)}</td>
               <td><span class="grade-chip ${g.cls}" style="--gc:${g.color}">${g.label}</span></td>
               <td><span class="lead-score" style="--gc:${g.color}">${l.score}</span></td>
-              <td class="lead-time">${l.time}</td>
+              <td class="lead-time">${escapeHtml(l.time)}</td>
               <td>
-                <button class="btn btn-sm" data-promote="${l.id}">转客户</button>
+                <button class="btn btn-sm" data-promote="${escapeHtml(l.id)}">转客户</button>
               </td>
             </tr>
           `;
@@ -925,9 +929,9 @@ function renderReports() {
   if (!el) return;
   el.innerHTML = REPORTS.length ? REPORTS.map(r => `
     <li style="--feed-color:${r.color}">
-      <span class="feed-time">${r.time}</span>
-      <span class="feed-tag">${r.tag}</span>
-      <span class="feed-text">📄 ${r.title}</span>
+      <span class="feed-time">${escapeHtml(r.time)}</span>
+      <span class="feed-tag">${escapeHtml(r.tag)}</span>
+      <span class="feed-text">📄 ${escapeHtml(r.title)}</span>
     </li>
   `).join("") : `<li class="feed-empty">暂无产出报告</li>`;
 }
@@ -1048,10 +1052,10 @@ function renderKBList() {
       : `${d.size} · ${d.type.toUpperCase()}`;
     return `
       <li class="kb-item" data-i="${i}">
-        <span class="kb-file-icon" style="--file-color:${color}">${ext}</span>
+        <span class="kb-file-icon" style="--file-color:${color}">${escapeHtml(ext)}</span>
         <div class="kb-file-info">
-          <div class="kb-file-name">${d.name}</div>
-          <div class="kb-file-meta">${meta}</div>
+          <div class="kb-file-name">${escapeHtml(d.name)}</div>
+          <div class="kb-file-meta">${escapeHtml(meta)}</div>
         </div>
         ${right}
         <button class="kb-item-del" data-i="${i}" title="删除">
@@ -1298,7 +1302,7 @@ function loadAgents() {
 //  真实执行模式：桥接 OpenClaw 后端（v0.2）
 //  后端: http://localhost:3001 (server\index.js)
 // ================================================================
-const API_BASE = "http://localhost:3001";
+const API_BASE = ""; // 同源：Express 托管前端，前后端同端口，用相对路径
 
 /** 调后端执行指令（真实 OpenClaw），返回 {content, approval} */
 async function callBackend(command) {

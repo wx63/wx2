@@ -125,7 +125,11 @@ async function runDirect(prompt, opts = {}) {
     if (!content.trim()) {
       return { ok: false, error: '模型未返回内容', _fallbackable: false };
     }
-    return { ok: true, content, raw };
+    const u = raw.usage || {};
+    return {
+      ok: true, content, raw,
+      _meta: { path: 'direct', model: DIRECT_MODEL, promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens },
+    };
   } catch (e) {
     const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
     return { ok: false, error: aborted ? `直连超时（${DIRECT_TIMEOUT_MS / 1000}s）` : e.message, _fallbackable: aborted || e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND' };
@@ -179,7 +183,11 @@ async function runViaGateway(prompt, opts = {}) {
       }
       return { ok: false, error: 'Agent 暂时无法生成响应，请稍后重试或换种问法', raw };
     }
-    return { ok: true, content, raw };
+    const u = raw.usage || {};
+    return {
+      ok: true, content, raw,
+      _meta: { path: 'gateway', model: `openclaw/${agentId}`, promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens },
+    };
   } catch (e) {
     const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
     return { ok: false, error: aborted ? `Gateway 响应超时（${GATEWAY_TIMEOUT_MS / 1000}s）` : e.message };
