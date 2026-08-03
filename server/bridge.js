@@ -20,7 +20,9 @@ const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || 'http://127.0.0.1:18789'
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || readGatewayToken();
 
 // 快路径默认模型：非 reasoning、响应快、稳定。可用 env 覆盖。
-const DIRECT_MODEL = process.env.OPENCLAW_DIRECT_MODEL || 'shuyanai/qwen3.6-flash';
+// 形如 "deepseek/deepseek-chat"：前缀 = models.json 里的 provider 名，后缀 = model id。
+// deepseek 官方 deepseek-chat（reasoning:false）实测 7-17s、5/5 稳定，比走 Gateway 快 2-5 倍。
+const DIRECT_MODEL = process.env.OPENCLAW_DIRECT_MODEL || 'deepseek/deepseek-chat';
 const DIRECT_TIMEOUT_MS = +process.env.OPENCLAW_DIRECT_TIMEOUT_MS || 30000;
 const GATEWAY_TIMEOUT_MS = +process.env.OPENCLAW_GATEWAY_TIMEOUT_MS || 60000;
 
@@ -35,7 +37,7 @@ function readGatewayToken() {
 }
 
 /**
- * 读 shuyanai provider 配置（baseUrl + apiKey），从 models.json。
+ * 按 DIRECT_MODEL 前缀（provider 名）从 models.json 读 baseUrl + apiKey。
  * env 可覆盖：OPENCLAW_PROVIDER_BASE_URL / OPENCLAW_PROVIDER_API_KEY
  */
 function readProviderConfig() {
@@ -44,10 +46,11 @@ function readProviderConfig() {
   try {
     const p = path.join(os.homedir(), '.openclaw', 'agents', 'main', 'agent', 'models.json');
     const m = JSON.parse(fs.readFileSync(p, 'utf-8'));
-    const sy = m.providers?.shuyanai || {};
+    const providerName = DIRECT_MODEL.split('/')[0]; // deepseek / shuyanai
+    const prov = m.providers?.[providerName] || {};
     return {
-      baseUrl: cfg.baseUrl || sy.baseUrl,
-      apiKey: cfg.apiKey || sy.apiKey,
+      baseUrl: cfg.baseUrl || prov.baseUrl,
+      apiKey: cfg.apiKey || prov.apiKey,
     };
   } catch (e) {
     return cfg;
@@ -89,7 +92,7 @@ const SYSTEM_PROMPT =
  * 用非 reasoning 模型，无 agent 16k 上下文开销，实测 11-17s 稳定。
  */
 async function runDirect(prompt, opts = {}) {
-  // DIRECT_MODEL 形如 "shuyanai/qwen3.6-flash" → provider=shuyanai, modelId=qwen3.6-flash
+  // DIRECT_MODEL 形如 "deepseek/deepseek-chat" → modelId=deepseek-chat
   const slash = DIRECT_MODEL.indexOf('/');
   const modelId = slash >= 0 ? DIRECT_MODEL.slice(slash + 1) : DIRECT_MODEL;
   const body = {
