@@ -11,8 +11,9 @@
 
 ```
 D:\基于OpenClaw构建跨境电商智能体\
-├── index.html / app.js / styles.css   # 前端控制台（运营矩阵仪表盘）
-├── login.html / login.js / login.css  # 登录页
+├── public\                             # 前端控制台静态资产（唯一对外静态目录）
+│   ├── index.html / app.js / styles.css
+│   └── login.html / login.js / login.css
 ├── docs\                              # 设计文档
 │   └── 架构设计.md                     # 系统架构 v1.0
 ├── 知识库\                            # RAG 源文档（尺码表/政策/产品手册）
@@ -25,14 +26,14 @@ D:\基于OpenClaw构建跨境电商智能体\
 ## 工作规则
 
 1. **对外动作要审批**：发帖、回复客户、下单、上架——AI 只出方案，人工确认后执行
-2. **数据分层**：业务数据（线索/订单）写 `data\`，经验教训写 `memory\`，不混放
+2. **数据分层**：业务数据（账号/审批/线索/报告/设置/审计）进 `data\app.db`，经验教训写 `memory\`，不混放
 3. **改前端前先看现状**：index.html/app.js 是已运行的界面，改动前先读全文件
 4. **不碰灰产**：不做防关联矩阵发帖、不爬平台后台、不自动下单
 5. **每完成一个功能**：更新 docs\ 对应文档 + 记入 memory\YYYY-MM-DD.md
 
 ## 启动方式
 
-- 前端：直接打开 index.html（纯静态）或按需起本地服务
+- 前端：通过后端访问 `http://localhost:3001/`；不要直接双击 HTML，业务 API 依赖同源会话
 - AI 助手：Claude Code / Codex 在本目录内运行（`cd D:\基于OpenClaw构建跨境电商智能体`）
 - OpenClaw：主 agent 常驻，通过会话指挥
 
@@ -41,7 +42,7 @@ D:\基于OpenClaw构建跨境电商智能体\
 - [x] 前端控制台雏形（登录页 + 运营矩阵仪表盘）
 - [x] 架构设计 v1.0
 - [x] 前端控制台二期：指令控制台（路由+流式+审批闸门）/ 任务下达弹窗 / 审批中心 / 线索管理 / 知识库上传接通 / 设置持久化 / 实时活动流
-- [x] OpenClaw 后端桥接（server/：指令执行 / 审批落库 / kb-query）
+- [x] OpenClaw 后端桥接（server/：指令执行 / SQLite 审批落库 / kb-query / 认证鉴权）
 - [x] 知识库建立（Phase 1）：尺码表 / 退换货政策 / FAQ
 - [x] kb-query 技能（Phase 1）：分块检索 + 带来源引用答复
 - [x] 审批中心接通真实后端（拉取 / 批准 / 驳回落库）

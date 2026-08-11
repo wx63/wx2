@@ -40,20 +40,35 @@ function readGatewayToken() {
  * 按 DIRECT_MODEL 前缀（provider 名）从 models.json 读 baseUrl + apiKey。
  * env 可覆盖：OPENCLAW_PROVIDER_BASE_URL / OPENCLAW_PROVIDER_API_KEY
  */
+function pickProviderValue(obj, keys) {
+  for (const k of keys) {
+    if (obj && typeof obj[k] === 'string' && obj[k].trim()) return obj[k].trim();
+  }
+  return '';
+}
+
+function defaultProviderBaseUrl(providerName) {
+  if (providerName === 'deepseek') return 'https://api.deepseek.com/v1';
+  return '';
+}
+
 function readProviderConfig() {
-  const cfg = { baseUrl: process.env.OPENCLAW_PROVIDER_BASE_URL || '', apiKey: process.env.OPENCLAW_PROVIDER_API_KEY || '' };
+  const providerName = DIRECT_MODEL.split('/')[0]; // deepseek / shuyanai
+  const cfg = {
+    baseUrl: process.env.OPENCLAW_PROVIDER_BASE_URL || '',
+    apiKey: process.env.OPENCLAW_PROVIDER_API_KEY || (providerName === 'deepseek' ? process.env.DEEPSEEK_API_KEY : '') || '',
+  };
   if (cfg.baseUrl && cfg.apiKey) return cfg;
   try {
     const p = path.join(os.homedir(), '.openclaw', 'agents', 'main', 'agent', 'models.json');
     const m = JSON.parse(fs.readFileSync(p, 'utf-8'));
-    const providerName = DIRECT_MODEL.split('/')[0]; // deepseek / shuyanai
     const prov = m.providers?.[providerName] || {};
     return {
-      baseUrl: cfg.baseUrl || prov.baseUrl,
-      apiKey: cfg.apiKey || prov.apiKey,
+      baseUrl: cfg.baseUrl || pickProviderValue(prov, ['baseUrl', 'baseURL', 'base_url', 'url', 'apiBase', 'api_base']) || defaultProviderBaseUrl(providerName),
+      apiKey: cfg.apiKey || pickProviderValue(prov, ['apiKey', 'api_key', 'key', 'token']),
     };
   } catch (e) {
-    return cfg;
+    return { ...cfg, baseUrl: cfg.baseUrl || defaultProviderBaseUrl(providerName) };
   }
 }
 
@@ -92,6 +107,9 @@ const SYSTEM_PROMPT =
  * 用非 reasoning 模型，无 agent 16k 上下文开销，实测 11-17s 稳定。
  */
 async function runDirect(prompt, opts = {}) {
+  if (!PROVIDER.baseUrl || !PROVIDER.apiKey) {
+    return { ok: false, error: `直连 provider 配置不完整：缺少 ${!PROVIDER.baseUrl ? 'baseUrl' : 'apiKey'}`, _fallbackable: true };
+  }
   // DIRECT_MODEL 形如 "deepseek/deepseek-chat" → modelId=deepseek-chat
   const slash = DIRECT_MODEL.indexOf('/');
   const modelId = slash >= 0 ? DIRECT_MODEL.slice(slash + 1) : DIRECT_MODEL;
@@ -128,7 +146,7 @@ async function runDirect(prompt, opts = {}) {
     const u = raw.usage || {};
     return {
       ok: true, content, raw,
-      _meta: { path: 'direct', model: DIRECT_MODEL, promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens },
+      _meta: { path: 'direct', model: DIRECT_MODEL, baseUrl: PROVIDER.baseUrl, promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens },
     };
   } catch (e) {
     const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
@@ -214,4 +232,4 @@ async function runAgent(prompt, opts = {}) {
   return direct;
 }
 
-module.exports = { runAgent, detectAction, GATEWAY_URL, DIRECT_MODEL };
+module.exports = { runAgent, detectAction, GATEWAY_URL, DIRECT_MODEL, PROVIDER };

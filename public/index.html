@@ -74,9 +74,9 @@
       <div class="sidebar-footer">
         <div class="gateway-status">
           <span class="dot dot-on pulse"></span>
-          <span>Gateway 运行中</span>
+          <span id="healthStatusText">服务状态检测中</span>
         </div>
-        <div class="model-chip">claude-opus-5</div>
+        <div class="model-chip" id="modelChip">模型检测中</div>
       </div>
     </aside>
 
@@ -86,7 +86,7 @@
       <header class="topbar">
         <div class="topbar-title">
           <h1 id="pageTitle">运营总览</h1>
-          <span class="topbar-sub" id="pageSub">5 名数字员工协同作战 · 实时</span>
+          <span class="topbar-sub" id="pageSub">5 名数字员工协同作战 · 最近快照</span>
         </div>
 
         <div class="command-bar">
@@ -135,8 +135,8 @@
 
           <div class="panel">
             <div class="panel-head">
-              <div class="ph-left"><span class="ph-dot"></span><h2>实时活动流</h2></div>
-              <span class="hint" id="feedStatus">监听中</span>
+              <div class="ph-left"><span class="ph-dot"></span><h2>最近活动流</h2></div>
+              <span class="hint" id="feedStatus">已加载</span>
             </div>
             <ul class="feed" id="activityFeed"></ul>
           </div>
@@ -162,7 +162,7 @@
         <div class="panel">
           <div class="panel-head">
             <div class="ph-left"><span class="ph-dot"></span><h2>待审批</h2></div>
-            <span class="hint">AI 只出方案，人工确认后执行</span>
+            <span class="hint">AI 只出方案，人工确认后归档；执行器接入前不真实执行</span>
           </div>
           <ul class="ap-list" id="approvalPending"></ul>
         </div>
@@ -230,6 +230,21 @@
   <!-- 任务/审批弹窗 -->
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal-body" id="modalBody"></div>
+  </div>
+
+  <!-- 全局指令结果抽屉：任意页面执行指令都可见 -->
+  <div class="command-drawer" id="commandDrawer" aria-live="polite" aria-label="指令执行结果">
+    <div class="command-drawer-head">
+      <div class="command-drawer-title">
+        <strong>指令执行结果</strong>
+        <span id="commandDrawerStatus">等待指令</span>
+      </div>
+      <div class="command-drawer-actions">
+        <button id="commandDrawerOverview" type="button">去总览</button>
+        <button id="commandDrawerToggle" type="button">收起</button>
+      </div>
+    </div>
+    <div class="console-body command-drawer-body" id="commandDrawerBody"></div>
   </div>
 
   <!-- Toast -->

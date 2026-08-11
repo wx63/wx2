@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { runAgent } = require('./bridge');
 
-const KB_DIR = path.join(__dirname, '..', '知识库');
+const KB_DIR = process.env.OPENCLAW_KB_DIR || path.join(__dirname, '..', '知识库');
 
 // ---------- 分块 ----------
 let CHUNKS = []; // { file, heading, content }

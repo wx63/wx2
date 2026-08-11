@@ -47,7 +47,6 @@
       <div class="auth-form">
         <div class="auth-tabs">
           <button class="auth-tab active" data-mode="login">登录</button>
-          <button class="auth-tab" data-mode="register">注册</button>
           <span class="auth-tab-underline" id="tabUnderline"></span>
         </div>
 
@@ -100,51 +99,8 @@
               <span>GitHub</span>
             </button>
           </div>
-        </form>
 
-        <!-- 注册表单 -->
-        <form class="form-panel" id="registerForm" novalidate>
-          <h2 class="form-title">创建账号</h2>
-          <p class="form-sub">部署你的第一个跨境 AI 团队</p>
-
-          <label class="field">
-            <span class="field-label">姓名</span>
-            <div class="field-input">
-              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
-              <input type="text" name="name" placeholder="你的称呼" autocomplete="name" required />
-            </div>
-            <span class="field-error"></span>
-          </label>
-
-          <label class="field">
-            <span class="field-label">邮箱</span>
-            <div class="field-input">
-              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
-              <input type="email" name="email" placeholder="you@company.com" autocomplete="email" required />
-            </div>
-            <span class="field-error"></span>
-          </label>
-
-          <label class="field">
-            <span class="field-label">密码</span>
-            <div class="field-input">
-              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-              <input type="password" name="password" placeholder="至少 8 位" autocomplete="new-password" required />
-              <button type="button" class="toggle-pwd" tabindex="-1" aria-label="显示密码">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-              </button>
-            </div>
-            <div class="pwd-strength" id="pwdStrength"><div class="pwd-bar"></div><div class="pwd-bar"></div><div class="pwd-bar"></div></div>
-            <span class="field-error"></span>
-          </label>
-
-          <label class="checkbox terms">
-            <input type="checkbox" name="terms" required />
-            <span class="check-box"></span>
-            <span>我已阅读并同意 <a class="link" href="#">服务条款</a> 与 <a class="link" href="#">隐私政策</a></span>
-          </label>
-
-          <button type="submit" class="btn-primary btn-block">创建账号</button>
+          <p class="form-sub auth-note">公开注册已关闭。首次部署请在 .env 中配置 ADMIN_EMAIL / ADMIN_PASSWORD 初始化管理员账号。</p>
         </form>
       </div>
     </section>

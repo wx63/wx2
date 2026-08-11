@@ -35,8 +35,9 @@ openclaw.json
 openclaw.json.bak*
 
 # ===== 运行时数据（按需保留或忽略）=====
-# 审批数据是业务产出，保留入库；如需清空可手动删
-# data/approvals.json
-# SQLite 数据库（本地运行产出，不入库）
+# 业务数据统一迁移到 SQLite，本地运行产出不入库
+/data/*.db
+/data/*.db-*
+/data/approvals.json
 server/data/*.db
 server/data/*.db-*
