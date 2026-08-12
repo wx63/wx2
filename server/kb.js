@@ -13,6 +13,16 @@ const KB_DIR = process.env.OPENCLAW_KB_DIR || path.join(__dirname, '..', '知识
 
 // ---------- 分块 ----------
 let CHUNKS = []; // { file, heading, content }
+let lastKbLoad = 0;
+const KB_TTL_MS = 300000;
+
+function ensureLoaded() {
+  if (Date.now() - lastKbLoad > KB_TTL_MS) {
+    loadKnowledgeBase();
+    lastKbLoad = Date.now();
+  }
+  return CHUNKS;
+}
 
 function loadKnowledgeBase() {
   CHUNKS = [];
@@ -25,6 +35,7 @@ function loadKnowledgeBase() {
     splitByHeading(file, text);
   }
   return CHUNKS;
+  lastKbLoad = Date.now();
 }
 
 /**
@@ -32,7 +43,7 @@ function loadKnowledgeBase() {
  * 供 /api/kb/files 标注每个文件是否已索引、块数。
  */
 function fileStats() {
-  loadKnowledgeBase();
+  ensureLoaded();
   const map = {};
   for (const c of CHUNKS) {
     if (!map[c.file]) map[c.file] = { chunks: 0, chars: 0 };
@@ -116,7 +127,7 @@ function scoreChunk(chunk, tokens) {
 }
 
 function retrieve(question, k = 3) {
-  loadKnowledgeBase(); // 每次检索前重载，确保文档更新即时生效（文件小，成本可忽略）
+  ensureLoaded();
   const tokens = tokenize(question);
   if (!tokens.length) return [];
   return CHUNKS

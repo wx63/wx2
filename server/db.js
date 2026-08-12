@@ -12,6 +12,8 @@ const DB_PATH = process.env.OPENCLAW_DB_PATH || path.join(DATA_DIR, 'app.db');
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
+db.exec('PRAGMA busy_timeout = 5000;');
+db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
 
 function hasColumn(table, column) {
   return db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
@@ -106,6 +108,7 @@ db.exec(`
     executed_at     TEXT,
     execute_status  TEXT,
     execute_error   TEXT,
+    run_id          INTEGER,
     FOREIGN KEY(created_by) REFERENCES users(id),
     FOREIGN KEY(decided_by) REFERENCES users(id)
   );
@@ -185,6 +188,27 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at);
 
+  CREATE TABLE IF NOT EXISTS orders (
+    id            TEXT PRIMARY KEY,
+    order_no      TEXT NOT NULL UNIQUE,
+    customer_name TEXT,
+    channel       TEXT,
+    country       TEXT,
+    product       TEXT,
+    sku           TEXT,
+    qty           INTEGER DEFAULT 1,
+    amount        REAL DEFAULT 0,
+    currency      TEXT DEFAULT 'USD',
+    status        TEXT NOT NULL DEFAULT 'pending',
+    tracking_no   TEXT,
+    carrier       TEXT,
+    note          TEXT,
+    created_at    TEXT DEFAULT (datetime('now')),
+    updated_at    TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
+  CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+
   CREATE TABLE IF NOT EXISTS settings (
     user_id     INTEGER NOT NULL,
     key         TEXT NOT NULL,
@@ -193,6 +217,50 @@ db.exec(`
     PRIMARY KEY (user_id, key),
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS agent_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    command_id  INTEGER,
+    user_id     INTEGER,
+    command     TEXT NOT NULL,
+    agent_id    TEXT,
+    status      TEXT NOT NULL DEFAULT 'queued',
+    model       TEXT,
+    path        TEXT,
+    duration_ms INTEGER,
+    plan_json   TEXT,
+    result      TEXT,
+    error       TEXT,
+    summary     TEXT,
+    context_json TEXT,
+    stats_json  TEXT,
+    created_at  TEXT DEFAULT (datetime('now')),
+    updated_at  TEXT DEFAULT (datetime('now')),
+    finished_at TEXT,
+    FOREIGN KEY(command_id) REFERENCES commands(id),
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_runs_command ON agent_runs(command_id);
+  CREATE INDEX IF NOT EXISTS idx_agent_runs_user ON agent_runs(user_id);
+  CREATE INDEX IF NOT EXISTS idx_agent_runs_created ON agent_runs(created_at);
+
+  CREATE TABLE IF NOT EXISTS agent_steps (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL,
+    seq         INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    label       TEXT,
+    tool        TEXT,
+    args_json   TEXT,
+    input       TEXT,
+    output      TEXT,
+    meta_json   TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    duration_ms INTEGER,
+    created_at  TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(run_id) REFERENCES agent_runs(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id);
 `);
 
 addColumnIfMissing('commands', 'user_id', 'INTEGER');
@@ -200,6 +268,12 @@ addColumnIfMissing('commands', 'content', 'TEXT');
 addColumnIfMissing('commands', 'updated_at', 'TEXT');
 addColumnIfMissing('commands', 'started_at', 'TEXT');
 addColumnIfMissing('commands', 'finished_at', 'TEXT');
+addColumnIfMissing('commands', 'run_id', 'INTEGER');
+addColumnIfMissing('approvals', 'run_id', 'INTEGER');
+addColumnIfMissing('agent_steps', 'meta_json', 'TEXT');
+addColumnIfMissing('agent_runs', 'summary', 'TEXT');
+addColumnIfMissing('agent_runs', 'context_json', 'TEXT');
+addColumnIfMissing('agent_runs', 'stats_json', 'TEXT');
 
 const DEFAULT_AGENTS = [
   { id: 0, emoji: '🔍', name: '市场调研 Agent', role: 'VOC 分析 · 竞品抓取 · 趋势预测', color: '#60a5fa', status: 'online', task: '正在交叉检索亚马逊 US / Shopee 东南亚 3 个品类的竞品数据', metrics: { 报告: 4, 数据源: 12 }, skills: [{ name: 'VOC 用户声音分析', on: true }, { name: '跨平台竞品数据抓取', on: true }, { name: 'POD 选品可行性报告', on: true }, { name: '趋势预测', on: false }], templates: [{ title: '竞品周报', prompt: '汇总本周亚马逊 US 宠物用品 Top20 竞品的价格、销量、差评关键词，输出竞品周报', icon: '📊' }, { title: 'VOC 分析', prompt: '抓取本品近 30 天的买家评论，分类正向/负向诉求并提炼 5 条产品改进建议', icon: '🗣️' }, { title: 'POD 选品报告', prompt: '调研定制宠物铭牌品类的需求量、竞争度与 POD 供应链可行性，出选品报告', icon: '🏷️' }, { title: '趋势预测', prompt: '预测未来 90 天东南亚市场家居收纳品类的搜索趋势与爆款候选', icon: '📈' }] },
@@ -236,10 +310,6 @@ const DEFAULT_LEADS = [
 ];
 
 const DEFAULT_SETTINGS = {
-  model_0: 'claude-opus-5',
-  model_1: 'claude-sonnet-5',
-  model_3: 'claude-sonnet-5',
-  model_4: 'claude-sonnet-5',
   feishu_webhook: '',
   n8n_callback: '',
   feishu_cmd: true,
@@ -307,7 +377,8 @@ function findUserById(id) {
 }
 
 function updateLastLogin(userId) {
-  db.prepare(`UPDATE users SET last_login_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(userId);
+  const ts = nowIso();
+  db.prepare(`UPDATE users SET last_login_at = @ts, updated_at = @ts WHERE id = @id`).run({ id: userId, ts });
 }
 
 function logAudit({ userId, action, entityType, entityId, ip, userAgent, metadata }) {
@@ -340,6 +411,7 @@ function commandRow(row) {
     error: row.error,
     needsApproval: !!row.needs_approval,
     approvalId: row.approval_id,
+    runId: row.run_id,
     promptTokens: row.prompt_tokens,
     completionTokens: row.completion_tokens,
     createdAt: row.created_at,
@@ -448,29 +520,203 @@ function recoverInterruptedCommands() {
 function recentCommands(limit = 50) {
   return db.prepare('SELECT * FROM commands ORDER BY id DESC LIMIT ?').all(limit).map(commandRow);
 }
+function agentStepRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    runId: row.run_id,
+    seq: row.seq,
+    kind: row.kind,
+    label: row.label,
+    tool: row.tool,
+    args: safeJsonParse(row.args_json, null),
+    input: row.input,
+    output: row.output,
+    meta: safeJsonParse(row.meta_json, null),
+    status: row.status,
+    durationMs: row.duration_ms,
+    createdAt: row.created_at,
+  };
+}
+function agentRunRow(row) {
+  if (!row) return null;
+  const steps = db.prepare('SELECT * FROM agent_steps WHERE run_id = ? ORDER BY seq, id').all(row.id).map(agentStepRow);
+  return {
+    id: row.id,
+    commandId: row.command_id,
+    userId: row.user_id,
+    command: row.command,
+    agentId: row.agent_id,
+    status: row.status,
+    model: row.model,
+    path: row.path,
+    durationMs: row.duration_ms,
+    plan: safeJsonParse(row.plan_json, []),
+    result: row.result,
+    error: row.error,
+    summary: row.summary,
+    context: safeJsonParse(row.context_json, {}),
+    stats: safeJsonParse(row.stats_json, {}),
+    steps,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    finishedAt: row.finished_at,
+  };
+}
+
+function createAgentRun({ commandId, userId, command, agentId, context }) {
+  const ts = nowIso();
+  const stmt = db.prepare(`INSERT INTO agent_runs (command_id, user_id, command, agent_id, status, context_json, updated_at)
+    VALUES (@commandId, @userId, @command, @agentId, 'queued', @context, @updatedAt)`).run({
+    commandId: commandId || null,
+    userId: userId || null,
+    command: String(command || '').slice(0, 4000),
+    agentId: agentId || 'main',
+    context: context != null ? toJson(context) : null,
+    updatedAt: ts,
+  });
+  const runId = Number(db.prepare('SELECT last_insert_rowid() AS id').get().id);
+  if (commandId) db.prepare('UPDATE commands SET run_id = ? WHERE id = ?').run(runId, commandId);
+  return runId;
+}
+function markAgentRunRunning(runId) {
+  const ts = nowIso();
+  db.prepare(`UPDATE agent_runs SET status = 'running', updated_at = @ts WHERE id = @id`).run({ id: runId, ts });
+  return getAgentRun(runId);
+}
+
+function appendAgentStep({ runId, seq, kind, label, tool, args, input, output, meta, status, durationMs }) {
+  db.prepare(`INSERT INTO agent_steps (run_id, seq, kind, label, tool, args_json, input, output, meta_json, status, duration_ms)
+    VALUES (@runId, @seq, @kind, @label, @tool, @args, @input, @output, @meta, @status, @durationMs)`).run({
+    runId,
+    seq: seq || 0,
+    kind: kind || 'step',
+    label: label ? String(label).slice(0, 300) : null,
+    tool: tool || null,
+    args: args != null ? toJson(args) : null,
+    input: input ? String(input).slice(0, 12000) : null,
+    output: output ? String(output).slice(0, 50000) : null,
+    meta: meta != null ? toJson(meta) : null,
+    status: status || 'done',
+    durationMs: durationMs != null ? durationMs : null,
+  });
+  db.prepare(`UPDATE agent_runs SET updated_at = ? WHERE id = ?`).run(nowIso(), runId);
+  return getAgentRun(runId);
+}
+function updateAgentStep(runId, seq, r) {
+  db.prepare(`UPDATE agent_steps SET
+    status = @status,
+    output = @output,
+    meta_json = @meta,
+    duration_ms = @durationMs,
+    label = @label
+    WHERE run_id = @runId AND seq = @seq`).run({
+    runId,
+    seq,
+    status: r.status || 'done',
+    output: r.output ? String(r.output).slice(0, 50000) : null,
+    meta: r.meta != null ? toJson(r.meta) : null,
+    durationMs: r.durationMs != null ? r.durationMs : null,
+    label: r.label ? String(r.label).slice(0, 300) : null,
+  });
+  db.prepare(`UPDATE agent_runs SET updated_at = ? WHERE id = ?`).run(nowIso(), runId);
+  return getAgentRun(runId);
+}
+function finishAgentRun(runId, r) {
+  const ts = nowIso();
+  db.prepare(`UPDATE agent_runs SET
+    status = @status,
+    model = @model,
+    path = @path,
+    duration_ms = @durationMs,
+    plan_json = @plan,
+    result = @result,
+    error = @error,
+    summary = @summary,
+    context_json = @context,
+    stats_json = @stats,
+    updated_at = @ts,
+    finished_at = @ts
+    WHERE id = @id`).run({
+    id: runId,
+    status: r.status || 'error',
+    model: r.model || null,
+    path: r.path || null,
+    durationMs: r.durationMs != null ? r.durationMs : null,
+    plan: r.plan != null ? toJson(r.plan) : null,
+    result: r.result ? String(r.result).slice(0, 50000) : null,
+    error: r.error ? String(r.error).slice(0, 2000) : null,
+    summary: r.summary ? String(r.summary).slice(0, 2000) : null,
+    context: r.context != null ? toJson(r.context) : null,
+    stats: r.stats != null ? toJson(r.stats) : null,
+    ts,
+  });
+  return getAgentRun(runId);
+}
+function getAgentRun(id) {
+  return agentRunRow(db.prepare('SELECT * FROM agent_runs WHERE id = ?').get(id));
+}
+
+function getAgentRunByCommandId(commandId) {
+  return agentRunRow(db.prepare('SELECT * FROM agent_runs WHERE command_id = ? ORDER BY id DESC LIMIT 1').get(commandId));
+}
+
+function listAgentRuns({ limit = 50, offset = 0, status, search, userId, role } = {}) {
+  const clauses = [];
+  const params = [];
+  if (status && status !== 'all') {
+    clauses.push('status = ?');
+    params.push(status);
+  }
+  if (search) {
+    clauses.push('(command LIKE ? OR summary LIKE ? OR agent_id LIKE ?)');
+    const like = '%' + String(search).slice(0, 200) + '%';
+    params.push(like, like, like);
+  }
+  if (userId && role !== 'admin') {
+    clauses.push('(user_id = ? OR user_id IS NULL)');
+    params.push(userId);
+  }
+  const where = clauses.length ? ' WHERE ' + clauses.join(' AND ') : '';
+  const total = Number(db.prepare('SELECT COUNT(*) AS n FROM agent_runs' + where).get(...params).n);
+  const rows = db.prepare('SELECT * FROM agent_runs' + where + ' ORDER BY id DESC LIMIT ? OFFSET ?').all(...params, limit, offset);
+  return { total, limit, offset, items: rows.map(agentRunRow) };
+}
+function markAgentRunCancelled(runId, userId, reason) {
+  const ts = nowIso();
+  const sql = "UPDATE agent_runs SET status = 'cancelled', error = @error, updated_at = @ts, finished_at = @ts WHERE id = @id AND status IN ('queued', 'running')";
+  db.prepare(sql).run({ id: runId, error: reason || "\u5df2\u7531\u7528\u6237\u53d6\u6d88", ts });
+  return getAgentRun(runId);
+}
+
+function listCommandJobs() {
+  return db.prepare('SELECT * FROM commands ORDER BY id DESC LIMIT 200').all().map(commandRow);
+}
+function recoverInterruptedRuns() {
+  const ts = nowIso();
+  const result = db.prepare(`UPDATE agent_runs SET status = 'error', error = '服务重启，Agent 任务未完成，请重新提交', updated_at = @ts, finished_at = @ts WHERE status IN ('queued', 'running')`).run({ ts });
+  return result.changes || 0;
+}
 
 function makeApprovalId(rowid) {
   return 'AP-' + String(rowid).padStart(3, '0');
 }
 
-function createApproval({ title, command, action, draft, risk, createdBy }) {
-  const tempId = `AP-TMP-${Date.now()}`;
-  db.prepare(`INSERT INTO approvals (id, title, command, action, draft, status, risk, created_by)
-    VALUES (@id, @title, @command, @action, @draft, 'pending', @risk, @createdBy)`).run({
-    id: tempId,
-    title: String(title || '未命名审批').slice(0, 300),
+function createApproval({ title, command, action, draft, risk, createdBy, runId }) {
+  const id = 'AP-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+  const sql = "INSERT INTO approvals (id, title, command, action, draft, status, risk, created_by, run_id) VALUES (@id, @title, @command, @action, @draft, 'pending', @risk, @createdBy, @runId)";
+  db.prepare(sql).run({
+    id,
+    title: String(title || '\u672a\u547d\u540d\u5ba1\u6279').slice(0, 300),
     command: String(command || '').slice(0, 4000),
     action: action || null,
     draft: draft || null,
     risk: risk || null,
     createdBy: createdBy || null,
+    runId: runId || null,
   });
-  const rowid = Number(db.prepare('SELECT rowid AS id FROM approvals WHERE id = ?').get(tempId).id);
-  const id = makeApprovalId(rowid);
-  db.prepare('UPDATE approvals SET id = ? WHERE id = ?').run(id, tempId);
   return getApproval(id);
 }
-
 function approvalRow(row) {
   if (!row) return null;
   return {
@@ -488,6 +734,7 @@ function approvalRow(row) {
     executedAt: row.executed_at,
     executeStatus: row.execute_status,
     executeError: row.execute_error,
+    runId: row.run_id,
   };
 }
 
@@ -495,13 +742,23 @@ function getApproval(id) {
   return approvalRow(db.prepare('SELECT * FROM approvals WHERE id = ?').get(id));
 }
 
-function listApprovals(limit = 200) {
-  return db.prepare('SELECT * FROM approvals ORDER BY created_at DESC, rowid DESC LIMIT ?').all(limit).map(approvalRow);
+function listApprovals({ limit = 200, userId, role } = {}) {
+  if (role && !['admin', 'operator'].includes(role)) return [];
+  let sql = 'SELECT * FROM approvals';
+  const params = [];
+  if (role === 'operator' && userId != null) {
+    sql += ' WHERE (created_by = ? OR created_by IS NULL)';
+    params.push(userId);
+  }
+  sql += ' ORDER BY created_at DESC, rowid DESC LIMIT ?';
+  params.push(limit);
+  return db.prepare(sql).all(...params).map(approvalRow);
 }
 
 function decideApproval({ id, decision, userId }) {
   const status = decision === 'approve' ? 'approved' : 'rejected';
-  db.prepare(`UPDATE approvals SET status = @status, decided_by = @userId, decided_at = datetime('now') WHERE id = @id`).run({ id, status, userId: userId || null });
+  const ts = nowIso();
+  db.prepare(`UPDATE approvals SET status = @status, decided_by = @userId, decided_at = @ts WHERE id = @id`).run({ id, status, userId: userId || null, ts });
   return getApproval(id);
 }
 
@@ -551,8 +808,14 @@ function listAgents() {
   return db.prepare('SELECT * FROM agents ORDER BY sort_order, id').all().map(agentRow);
 }
 
-function updateAgentStatus(id, status) {
-  db.prepare(`UPDATE agents SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
+function updateAgentStatus(id, status, task) {
+  if (task != null) {
+    const ts = nowIso();
+    db.prepare(`UPDATE agents SET status = @status, task = @task, updated_at = @ts WHERE id = @id`).run({ status, task: String(task).slice(0, 300), ts, id });
+  } else {
+    const ts = nowIso();
+    db.prepare(`UPDATE agents SET status = @status, updated_at = @ts WHERE id = @id`).run({ status, ts, id });
+  }
   return db.prepare('SELECT * FROM agents WHERE id = ?').get(id);
 }
 
@@ -562,12 +825,13 @@ function updateAgentSkill(id, skillIndex, enabled) {
   const skills = safeJsonParse(row.skills_json, []);
   if (!skills[skillIndex]) return null;
   skills[skillIndex].on = !!enabled;
-  db.prepare(`UPDATE agents SET skills_json = ?, updated_at = datetime('now') WHERE id = ?`).run(toJson(skills), id);
+  const ts = nowIso();
+  db.prepare(`UPDATE agents SET skills_json = @skills, updated_at = @ts WHERE id = @id`).run({ skills: toJson(skills), ts, id });
   return agentRow(db.prepare('SELECT * FROM agents WHERE id = ?').get(id));
 }
 
 function listKpis() {
-  return db.prepare('SELECT * FROM kpis ORDER BY sort_order').all().map(row => ({
+  const rows = db.prepare('SELECT * FROM kpis ORDER BY sort_order').all().map(row => ({
     key: row.key,
     label: row.label,
     value: row.value,
@@ -577,6 +841,53 @@ function listKpis() {
     color: row.color,
     spark: safeJsonParse(row.spark_json, []),
   }));
+
+  const leadCount = Number(db.prepare("SELECT COUNT(*) AS n FROM leads WHERE status = 'new'").get().n);
+  const agentRows = db.prepare('SELECT status, COUNT(*) AS n FROM agents GROUP BY status').all();
+  const agentMap = {};
+  for (const r of agentRows) agentMap[r.status] = Number(r.n);
+  const totalAgents = Number(db.prepare('SELECT COUNT(*) AS n FROM agents').get().n);
+  const onlineAgents = (agentMap.online || 0) + (agentMap.busy || 0);
+  const pendingApprovals = Number(db.prepare("SELECT COUNT(*) AS n FROM approvals WHERE status = 'pending'").get().n);
+
+  let ordersAvailable = true;
+  let orderCount = 0;
+  try {
+    orderCount = orderStats().total;
+  } catch (e) {
+    ordersAvailable = false;
+  }
+
+  return rows.map(k => {
+    if (k.key === 'leads') {
+      k.value = String(leadCount);
+      k.trend = '\u5b9e\u65f6\u7ebf\u7d22\u5e93';
+      k.up = false;
+      k.spark = [leadCount];
+    } else if (k.key === 'agents') {
+      k.value = onlineAgents + ' / ' + totalAgents;
+      k.trend = '\u5b9e\u65f6 Agent \u72b6\u6001';
+      k.up = false;
+      k.spark = [onlineAgents];
+    } else if (k.key === 'risk') {
+      k.value = String(pendingApprovals);
+      k.trend = '\u5f85\u5ba1\u6279\u5916\u90e8\u52a8\u4f5c';
+      k.up = false;
+      k.spark = [pendingApprovals];
+    } else if (k.key === 'orders') {
+      if (!ordersAvailable) {
+        k.value = '\u672a\u63a5\u5165';
+        k.trend = '\u7b49\u5f85 ERP/\u5e73\u53f0 API';
+        k.up = false;
+      } else {
+        k.value = String(orderCount);
+        k.trend = '\u8ba2\u5355\u5e93\u5b9e\u65f6\u7edf\u8ba1';
+        k.up = false;
+      }
+      k.spark = [ordersAvailable ? orderCount : 0];
+    }
+    return k;
+  });
 }
 
 function listActivity(limit = 30) {
@@ -599,7 +910,8 @@ function addActivity({ tag, color, text, userId }) {
   });
 }
 
-function listLeads(grade = 'all') {
+function listLeads(grade = 'all', { role = 'admin' } = {}) {
+  if (role && !['admin', 'operator'].includes(role)) return [];
   const rows = grade && grade !== 'all'
     ? db.prepare('SELECT * FROM leads WHERE grade = ? ORDER BY created_at DESC').all(grade)
     : db.prepare('SELECT * FROM leads ORDER BY created_at DESC').all();
@@ -607,10 +919,114 @@ function listLeads(grade = 'all') {
 }
 
 function promoteLead(id, userId) {
-  db.prepare(`UPDATE leads SET status = 'promoted', promoted_by = ?, promoted_at = datetime('now') WHERE id = ?`).run(userId || null, id);
+  const ts = nowIso();
+  db.prepare(`UPDATE leads SET status = 'promoted', promoted_by = @promotedBy, promoted_at = @ts WHERE id = @id`).run({ promotedBy: userId || null, ts, id });
   return db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
 }
 
+function orderRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    orderNo: row.order_no,
+    customerName: row.customer_name,
+    channel: row.channel,
+    country: row.country,
+    product: row.product,
+    sku: row.sku,
+    qty: row.qty,
+    amount: row.amount,
+    currency: row.currency,
+    status: row.status,
+    trackingNo: row.tracking_no,
+    carrier: row.carrier,
+    note: row.note,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function listOrders({ limit = 100, offset = 0, status = 'all', search = '' } = {}) {
+  const clauses = [];
+  const params = [];
+  if (status && status !== 'all') {
+    clauses.push('status = ?');
+    params.push(status);
+  }
+  if (search) {
+    clauses.push('(order_no LIKE ? OR customer_name LIKE ? OR product LIKE ? OR sku LIKE ? OR tracking_no LIKE ?)');
+    const like = '%' + String(search).slice(0, 200) + '%';
+    params.push(like, like, like, like, like);
+  }
+  const where = clauses.length ? ' WHERE ' + clauses.join(' AND ') : '';
+  const total = Number(db.prepare('SELECT COUNT(*) AS n FROM orders' + where).get(...params).n);
+  const rows = db.prepare('SELECT * FROM orders' + where + ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?').all(...params, limit, offset);
+  return { total, limit, offset, items: rows.map(orderRow) };
+}
+
+function addOrder(data) {
+  const seq = Number(db.prepare('SELECT COUNT(*) AS n FROM orders').get().n) + 1;
+  const id = 'ORD-' + String(seq).padStart(5, '0');
+  const orderNo = String(data.orderNo || id);
+  db.prepare(`INSERT OR REPLACE INTO orders (id, order_no, customer_name, channel, country, product, sku, qty, amount, currency, status, tracking_no, carrier, note)
+    VALUES (@id, @orderNo, @customerName, @channel, @country, @product, @sku, @qty, @amount, @currency, @status, @trackingNo, @carrier, @note)`).run({
+    id,
+    orderNo: orderNo.slice(0, 80),
+    customerName: data.customerName ? String(data.customerName).slice(0, 100) : null,
+    channel: data.channel ? String(data.channel).slice(0, 40) : null,
+    country: data.country ? String(data.country).slice(0, 40) : null,
+    product: data.product ? String(data.product).slice(0, 200) : null,
+    sku: data.sku ? String(data.sku).slice(0, 80) : null,
+    qty: data.qty != null ? Math.max(1, Number(data.qty) || 1) : 1,
+    amount: data.amount != null ? Number(data.amount) || 0 : 0,
+    currency: data.currency ? String(data.currency).slice(0, 10) : 'USD',
+    status: data.status ? String(data.status).slice(0, 20) : 'pending',
+    trackingNo: data.trackingNo ? String(data.trackingNo).slice(0, 80) : null,
+    carrier: data.carrier ? String(data.carrier).slice(0, 40) : null,
+    note: data.note ? String(data.note).slice(0, 500) : null,
+  });
+  return orderRow(db.prepare('SELECT * FROM orders WHERE order_no = ?').get(orderNo));
+}
+
+function updateOrder(id, data) {
+  const row = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+  if (!row) return null;
+  db.prepare(`UPDATE orders SET
+    order_no = @orderNo, customer_name = @customerName, channel = @channel, country = @country,
+    product = @product, sku = @sku, qty = @qty, amount = @amount, currency = @currency,
+    status = @status, tracking_no = @trackingNo, carrier = @carrier, note = @note,
+    updated_at = @updatedAt WHERE id = @id`).run({
+    id,
+    updatedAt: nowIso(),
+    orderNo: String(data.orderNo || row.order_no).slice(0, 80),
+    customerName: data.customerName != null ? String(data.customerName).slice(0, 100) : row.customer_name,
+    channel: data.channel != null ? String(data.channel).slice(0, 40) : row.channel,
+    country: data.country != null ? String(data.country).slice(0, 40) : row.country,
+    product: data.product != null ? String(data.product).slice(0, 200) : row.product,
+    sku: data.sku != null ? String(data.sku).slice(0, 80) : row.sku,
+    qty: data.qty != null ? Math.max(1, Number(data.qty) || 1) : row.qty,
+    amount: data.amount != null ? Number(data.amount) || 0 : row.amount,
+    currency: data.currency ? String(data.currency).slice(0, 10) : row.currency,
+    status: data.status ? String(data.status).slice(0, 20) : row.status,
+    trackingNo: data.trackingNo != null ? String(data.trackingNo).slice(0, 80) : row.tracking_no,
+    carrier: data.carrier != null ? String(data.carrier).slice(0, 40) : row.carrier,
+    note: data.note != null ? String(data.note).slice(0, 500) : row.note,
+  });
+  return orderRow(db.prepare('SELECT * FROM orders WHERE id = ?').get(id));
+}
+
+function deleteOrder(id) {
+  const result = db.prepare('DELETE FROM orders WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+function orderStats() {
+  const total = Number(db.prepare('SELECT COUNT(*) AS n FROM orders').get().n);
+  const today = Number(db.prepare("SELECT COUNT(*) AS n FROM orders WHERE date(created_at) = date('now')").get().n);
+  const pending = Number(db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'").get().n);
+  const shipped = Number(db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'shipped'").get().n);
+  return { total, today, pending, shipped };
+}
 function listReports(limit = 20) {
   return db.prepare('SELECT * FROM reports ORDER BY created_at DESC LIMIT ?').all(limit).map(row => ({
     id: row.id,
@@ -625,8 +1041,7 @@ function listReports(limit = 20) {
 }
 
 function addReport({ agent, title, tag, color, content, commandId, userId }) {
-  const seq = Number(db.prepare('SELECT COUNT(*) AS n FROM reports').get().n) + 1;
-  const id = 'R-' + String(seq).padStart(3, '0');
+  const id = 'R-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 8).toUpperCase();
   db.prepare(`INSERT INTO reports (id, agent_id, title, tag, color, content, command_id, created_by)
     VALUES (@id, @agent, @title, @tag, @color, @content, @commandId, @userId)`).run({
     id,
@@ -650,19 +1065,21 @@ function getSettings(userId) {
 
 function setSetting(userId, key, value) {
   if (!Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key)) throw new Error('未知设置项');
+  const ts = nowIso();
   db.prepare(`INSERT INTO settings (user_id, key, value_json, updated_at)
-    VALUES (@userId, @key, @value, datetime('now'))
-    ON CONFLICT(user_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = datetime('now')`).run({ userId, key, value: toJson(value) });
+    VALUES (@userId, @key, @value, @ts)
+    ON CONFLICT(user_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = @ts`).run({ userId, key, value: toJson(value), ts });
   return getSettings(userId);
 }
 
-function getDashboard(userId) {
+function getDashboard(userId, role = 'admin') {
   return {
     agents: listAgents(),
     kpis: listKpis(),
     activity: listActivity(30),
-    leads: listLeads('all'),
+    leads: listLeads('all', { role }),
     reports: listReports(20),
+    runs: role === 'admin' ? listAgentRuns({ limit: 10 }).items : listAgentRuns({ limit: 10, userId, role }).items,
     settings: getSettings(userId),
   };
 }
@@ -699,8 +1116,24 @@ module.exports = {
   listLeads,
   promoteLead,
   listReports,
+  listOrders,
+  addOrder,
+  updateOrder,
+  deleteOrder,
+  orderStats,
   addReport,
   getSettings,
   setSetting,
   getDashboard,
+  createAgentRun,
+  markAgentRunRunning,
+  appendAgentStep,
+  updateAgentStep,
+  finishAgentRun,
+  getAgentRun,
+  getAgentRunByCommandId,
+  listAgentRuns,
+  markAgentRunCancelled,
+  listCommandJobs,
+  recoverInterruptedRuns,
 };

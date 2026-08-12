@@ -113,6 +113,12 @@ test('approval migration uses isolated data directory', () => {
   assert.equal(migrated.command, '仅测试临时数据目录');
 });
 
+
+test('approval creation persists linked agent run', () => {
+  const runId = dbmod.createAgentRun({ commandId: null, userId: 1, command: 'link approval', agentId: 'main' });
+  const ap = dbmod.createApproval({ title: '链接运行审批', command: '发帖', action: 'social_post', draft: 'draft', risk: 'risk', createdBy: 1, runId });
+  assert.equal(ap.runId, runId);
+});
 test('approval lifecycle and execute is archive-only', async () => {
   const operator = await loginAs('operator@example.com');
   const ap = dbmod.createApproval({ title: '测试审批', command: '发帖测试', action: 'social_post', draft: '草稿', risk: '测试', createdBy: 1 });
@@ -164,14 +170,128 @@ test('backend action detection is source of truth', async () => {
   assert.equal((await analysis.json()).data.needsApproval, false);
 });
 
-test('csv export requires auth and returns csv', async () => {
+test('csv export requires auth and restricts viewer', async () => {
   assert.equal((await fetch(ctx.base + '/api/leads/export.csv')).status, 401);
   const viewer = await loginAs('viewer@example.com');
-  const resp = await viewer('/api/leads/export.csv');
+  assert.equal((await viewer('/api/leads/export.csv')).status, 403);
+  const admin = await loginAs('admin@example.com');
+  const resp = await admin('/api/leads/export.csv');
   assert.equal(resp.status, 200);
   assert.match(resp.headers.get('content-type'), /text\/csv/);
   assert.match(resp.headers.get('content-disposition'), /leads\.csv/);
   const text = await resp.text();
   assert.match(text, /"线索ID","渠道"/);
   assert.match(text, /"状态"/);
+
+});
+
+test('agent step meta persists structured tool metadata', () => {
+  const runId = dbmod.createAgentRun({ commandId: null, userId: 1, command: 'meta test', agentId: 'main' });
+  dbmod.markAgentRunRunning(runId);
+  dbmod.appendAgentStep({ runId, seq: 0, kind: 'tool', label: 'context', tool: 'context', input: 'q', output: 'hit', meta: { hits: 2, sources: ['a', 'b'] }, status: 'running' });
+  dbmod.updateAgentStep(runId, 0, { status: 'done', output: 'hit', meta: { hits: 2, sources: ['a', 'b'] }, durationMs: 3 });
+  const step = dbmod.getAgentRun(runId).steps[0];
+  assert.deepEqual(step.meta, { hits: 2, sources: ['a', 'b'] });
+});
+test('agent run persistence records real steps', () => {
+  const runId = dbmod.createAgentRun({ commandId: null, userId: 1, command: 'Agent test', agentId: 'main' });
+  assert.ok(runId > 0);
+  dbmod.markAgentRunRunning(runId);
+  dbmod.appendAgentStep({ runId, seq: 0, kind: 'plan', label: 'route', tool: 'route', input: 'x', output: '', status: 'running' });
+  dbmod.updateAgentStep(runId, 0, { status: 'done', output: 'routed', durationMs: 5 });
+  dbmod.appendAgentStep({ runId, seq: 1, kind: 'tool', label: 'kb', tool: 'context', input: 'x', output: 'done', status: 'done' });
+  dbmod.finishAgentRun(runId, { status: 'ok', plan: [{ seq: 1 }], result: 'final', durationMs: 10, path: 'agent', model: 'orchestrator' });
+  const run = dbmod.getAgentRun(runId);
+  assert.equal(run.status, 'ok');
+  assert.equal(run.result, 'final');
+  assert.equal(run.steps.length, 2);
+  assert.equal(run.steps[0].output, 'routed');
+});
+
+
+
+test('agent run context summary and stats persist', () => {
+  const runId = dbmod.createAgentRun({ commandId: null, userId: 1, command: 'context test', agentId: 'main', context: { task: 'context test', route: '运营总监', agentId: 0 } });
+  dbmod.markAgentRunRunning(runId);
+  dbmod.appendAgentStep({ runId, seq: 0, kind: 'plan', label: 'route', tool: 'route', input: 'x', output: 'routed', status: 'done' });
+  dbmod.finishAgentRun(runId, { status: 'ok', plan: [], result: '最终产出', summary: '摘要内容', context: { task: 'context test' }, stats: { steps: 1, tools: 0, retries: 1 }, durationMs: 5, path: 'agent', model: 'orchestrator' });
+  const run = dbmod.getAgentRun(runId);
+  assert.equal(run.summary, '摘要内容');
+  assert.deepEqual(run.context, { task: 'context test' });
+  assert.deepEqual(run.stats, { steps: 1, tools: 0, retries: 1 });
+});
+test('agent command execution persists failed orchestration run', async () => {
+  const result = await app.executeAgentCommand({ commandId: null, userId: 1, command: '分析竞品趋势', agentId: 'main', sessionId: 'test-run' });
+  assert.equal(result.ok, false);
+  const run = dbmod.getAgentRun(result.runId);
+  assert.equal(run.status, 'error');
+  assert.ok(run.steps.length >= 2);
+  assert.ok(run.steps.some(s => s.tool === 'route'));
+});
+
+test('agent run admin cancel and rerun endpoints work', async () => {
+  const runId = dbmod.createAgentRun({ commandId: null, userId: 1, command: 'cancel rerun test', agentId: 'main', context: { task: 'cancel rerun', agentId: 0 } });
+  dbmod.markAgentRunRunning(runId);
+  const admin = await loginAs('admin@example.com');
+  const cancel = await admin('/api/agent-runs/' + runId + '/cancel', { method: 'POST' });
+  assert.equal(cancel.status, 200);
+  assert.equal((await cancel.json()).data.status, 'cancelled');
+  const rerun = await admin('/api/agent-runs/' + runId + '/rerun', { method: 'POST' });
+  assert.equal(rerun.status, 202);
+  const rerunBody = await rerun.json();
+  assert.ok(rerunBody.commandId > 0);
+});
+
+test('agent runs endpoint filters and paginates', async () => {
+  const admin = await loginAs('admin@example.com');
+  const resp = await admin('/api/agent-runs?limit=5&offset=0&status=ok&search=test');
+  assert.equal(resp.status, 200);
+  const body = await resp.json();
+  assert.equal(typeof body.data.total, 'number');
+  assert.ok(Array.isArray(body.data.items));
+  assert.equal(body.data.limit, 5);
+  assert.equal(body.data.offset, 0);
+});
+
+
+test('local order CRUD and stats endpoint works', async () => {
+  const admin = await loginAs('admin@example.com');
+  const created = await admin('/api/orders', jsonReq('POST', { orderNo: 'ORD-TEST-001', customerName: 'Test Buyer', product: 'Pet Bottle', qty: 2, amount: 39.8, status: 'pending' }));
+  assert.equal(created.status, 201);
+  const order = (await created.json()).data;
+  assert.equal(order.orderNo, 'ORD-TEST-001');
+
+  const listed = await admin('/api/orders?search=ORD-TEST-001');
+  assert.equal(listed.status, 200);
+  const listBody = await listed.json();
+  assert.ok(listBody.data.items.some(o => o.orderNo === 'ORD-TEST-001'));
+
+  const stats = await admin('/api/orders/stats');
+  assert.equal(stats.status, 200);
+  const statsBody = await stats.json();
+  assert.ok(statsBody.data.total >= 1);
+});
+
+test('feishu integration status endpoint is available', async () => {
+  const admin = await loginAs('admin@example.com');
+  const resp = await admin('/api/integrations/feishu');
+  assert.equal(resp.status, 200);
+  const body = await resp.json();
+  assert.equal(typeof body.data.configured, 'boolean');
+});
+
+test('agentic fallback path remains compatible', async () => {
+  const result = await app.executeAgentCommand({ commandId: null, userId: 1, command: '??????', agentId: 'main', sessionId: 'test-agentic' });
+  assert.equal(result.path, 'agentic_fallback');
+  assert.equal(typeof result.ok, 'boolean');
+  assert.ok(result.runId > 0);
+});
+
+test('agent runs endpoint lists persisted runs', async () => {
+  const admin = await loginAs('admin@example.com');
+  const resp = await admin('/api/agent-runs');
+  assert.equal(resp.status, 200);
+  const body = await resp.json();
+  assert.ok(Array.isArray(body.data.items));
+  assert.ok(body.data.items.length >= 1);
 });

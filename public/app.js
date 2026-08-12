@@ -194,11 +194,7 @@ function handleCommand(tpl = null) {
   openCommandDrawer();
   if (currentView !== "overview") showToast("指令已开始执行，结果会显示在右下角抽屉");
   // tpl 带 mode: 'kb' → 走知识库检索（kb-query）
-  if (tpl && tpl.mode === "kb") {
-    runKbQuery(cmd);
-  } else {
-    runCommand(cmd);
-  }
+  runCommand(cmd);
 }
 document.getElementById("commandSend").addEventListener("click", () => handleCommand());
 document.getElementById("commandInput").addEventListener("keydown", (e) => {
@@ -256,7 +252,7 @@ function sparkSVG(data, color) {
 function renderKPI() {
   document.getElementById("kpiRow").innerHTML = KPIS.map((k) => {
     const color = safeCssColor(k.color, "#6366f1");
-    const icon = typeof k.icon === "string" && !/script|on\w+=|<\/?svg/i.test(k.icon) ? k.icon : "";
+    const icon = typeof k.icon === "string" && !/script|on\w+=|<\/?svg|foreignObject|javascript:/i.test(k.icon) ? k.icon : "";
     const value = k.key === "leads" ? `<span id="leadCount">${escapeHtml(LEADS.length)}</span>`
       : k.key === "agents" ? `<span id="onlineAgents">${AGENTS.filter(a => a.status !== "offline").length}</span> / ${AGENTS.length}`
       : escapeHtml(k.value);
@@ -478,6 +474,7 @@ const PAGE_META = {
   agent: ["数字员工", "单个 Agent 详情与技能管理"],
   approval: ["审批中心", "对外动作的人工确认闸门"],
   leads: ["线索管理", "全渠道进线分级打标 · 导出 leads.csv"],
+  orders: ["订单管理", "本地订单录入/查询/状态管理"],
   knowledge: ["知识库", "RAG 索引文档管理"],
   settings: ["设置", "渠道 · 模型 · 沙箱 · 安全"],
 };
@@ -500,6 +497,7 @@ function switchView(view, agentId) {
   if (view === "agent" && agentId != null) renderAgentDetail(agentId);
   if (view === "approval") { renderApprovals(); loadApprovalsFromServer(); }
   if (view === "leads") renderLeads();
+  if (view === "orders") { renderOrders(); loadOrdersFromServer(); }
   if (view === "knowledge") loadKBFilesFromServer();
 }
 
@@ -585,7 +583,11 @@ async function loadUser() {
     document.getElementById("userAvatar").textContent = name.charAt(0).toUpperCase();
     return currentUser;
   } catch (e) {
-    window.location.href = "/login.html";
+    if (e.message === "????" || String(e.message).includes("401")) {
+      window.location.href = "/login.html";
+      return null;
+    }
+    showToast("?????????" + e.message);
     return null;
   }
 }
@@ -714,7 +716,8 @@ async function decideApproval(ap, decision) {
     });
     const updated = normalizeApproval(data.data);
     if (updated) {
-      if (idx >= 0) APPROVALS[idx] = updated;
+      const currentIdx = APPROVALS.findIndex(x => x.id === ap.id);
+      if (currentIdx >= 0) APPROVALS[currentIdx] = updated;
       else APPROVALS.unshift(updated);
     }
     pushFeed("审批", meta.color, `${decision === "approve" ? "批准并归档" : "驳回"} ${meta.label}草稿 #${ap.id}，${decision === "approve" ? "已归档（执行器未接入）" : "退回修改"}`);
@@ -723,7 +726,8 @@ async function decideApproval(ap, decision) {
       ? `✅ 已批准并归档「${updated ? updated.title : ap.title}」，已归档（执行器尚未接入，未真实执行）`
       : `已驳回「${updated ? updated.title : ap.title}」，退回修改`);
   } catch (e) {
-    if (idx >= 0) APPROVALS[idx] = snapshot;
+    const currentIdx = APPROVALS.findIndex(x => x.id === ap.id);
+    if (currentIdx >= 0) APPROVALS[currentIdx] = snapshot;
     renderApprovals();
     await loadApprovalsFromServer();
     showToast(`⚠ 审批同步失败：${e.message}，已恢复服务器状态`);
@@ -744,6 +748,10 @@ function openApprovalDraft(ap) {
       <button class="modal-close" id="modalClose" aria-label="关闭">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
+    </div>
+    <div class="task-modal-section">
+      <div class="tms-label">来源 Agent 运行${ap.runId ? ` · Run #${ap.runId}` : ""}</div>
+      <div class="agent-step-meta">${ap.runId ? `该草稿由 Agent Run #${ap.runId} 生成` : "历史审批未关联 Agent 运行"}</div>
     </div>
     <div class="task-modal-section">
       <div class="tms-label">AI 生成草稿（待人工复核）</div>
@@ -844,8 +852,13 @@ function renderLeads() {
 }
 
 async function refreshLeadsFromServer() {
-  await loadDashboardData();
-  renderLeads();
+  try {
+    await loadDashboardData();
+    renderLeads();
+  } catch (e) {
+    showToast("?????" + e.message);
+    throw e;
+  }
 }
 
 // 导出 leads.csv（以后端 SQLite 为准）
@@ -862,6 +875,7 @@ function bindExportLeads() {
 //  报告沉淀（控制台最终产出）
 // ================================================================
 let REPORTS = [];
+let RUNS = { items: [], total: 0 };
 function addReport(r) {
   const report = { ...r, time: timeLabel(), id: "R-" + String(REPORTS.length + 1).padStart(3, "0") };
   REPORTS.unshift(report);
@@ -871,7 +885,7 @@ function addReport(r) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ agent: r.agent, title: r.title, tag: r.tag, color: r.color, content: r.content || "" }),
-  }).catch(() => {});
+  }).catch(e => showToast("???????" + e.message));
 }
 function renderReports() {
   const el = document.getElementById("reportList");
@@ -911,6 +925,149 @@ function openReportDetail(report) {
 }
 
 // ================================================================
+let RUN_FILTER = { status: "all", search: "", offset: 0, limit: 20 };
+let runSearchTimer = null;
+function debounceRunSearch(fn, ms = 300) { clearTimeout(runSearchTimer); runSearchTimer = setTimeout(fn, ms); }
+function renderAgentRuns() {
+  const el = document.getElementById("agentRunList");
+  if (!el) return;
+  const colorFor = (r) => r.status === "ok" ? "#34d399" : r.status === "running" ? "#fbbf24" : r.status === "cancelled" ? "#7e85a3" : "#fb7185";
+  const steps = (r) => (r.steps && r.steps.length) || 0;
+  const when = (r) => String(r.finishedAt || r.createdAt || "").slice(11, 16);
+  const items = RUNS && RUNS.items ? RUNS.items : (RUNS || []);
+  const total = RUNS && RUNS.total ? RUNS.total : items.length;
+  const listHtml = items.length ? items.map(r => {
+    const line = [String(r.id), r.agentId || "main", r.summary || String(r.command || "").slice(0, 28), String(steps(r)) + " steps"];
+    const actions = '<button class="btn btn-sm" data-run-action="view" data-id="' + escapeAttr(r.id) + '">查看</button>' +
+      (r.status === "running" || r.status === "queued" ? '<button class="btn btn-sm" data-run-action="cancel" data-id="' + escapeAttr(r.id) + '">取消</button>' : "") +
+      (r.status === "error" || r.status === "cancelled" ? '<button class="btn btn-sm" data-run-action="rerun" data-id="' + escapeAttr(r.id) + '">重跑</button>' : "");
+    return '<li style="--feed-color:' + safeCssColor(colorFor(r)) + '" data-run="' + escapeAttr(r.id) + '">' +
+      '<span class="feed-time">' + escapeHtml(when(r)) + '</span>' +
+      '<span class="feed-tag">' + escapeHtml(r.status || "unknown") + '</span>' +
+      '<span class="feed-text">' + escapeHtml(line.join(" · ")) + '</span>' +
+      '<span class="feed-actions">' + actions + '</span></li>';
+  }).join("") : '<li class="feed-empty">暂无 Agent 运行记录</li>';
+  el.innerHTML = listHtml + '<li class="feed-empty" style="justify-content:space-between"><span>共 ' + escapeHtml(String(total)) + ' 条</span><span><button class="btn btn-sm" id="runPrev">上一页</button> <button class="btn btn-sm" id="runNext">下一页</button></span></li>';
+  const prev = document.getElementById("runPrev");
+  const next = document.getElementById("runNext");
+  if (prev) prev.onclick = () => { RUN_FILTER.offset = Math.max(0, RUN_FILTER.offset - RUN_FILTER.limit); loadAgentRuns(); };
+  if (next) next.onclick = () => { RUN_FILTER.offset += RUN_FILTER.limit; loadAgentRuns(); };
+  const search = document.getElementById("runSearch");
+  const status = document.getElementById("runStatus");
+  if (search && !search.dataset.bound) {
+    search.dataset.bound = "1";
+    search.addEventListener("input", () => { RUN_FILTER.search = search.value.trim(); RUN_FILTER.offset = 0; debounceRunSearch(() => loadAgentRuns()); });
+  }
+  if (status && !status.dataset.bound) {
+    status.dataset.bound = "1";
+    status.addEventListener("change", () => { RUN_FILTER.status = status.value; RUN_FILTER.offset = 0; loadAgentRuns(); });
+  }
+  el.querySelectorAll("[data-run-action]").forEach(btn => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); const id = Number(btn.dataset.id); const act = btn.dataset.runAction; handleRunAction(id, act); });
+  });
+  el.querySelectorAll("[data-run]").forEach(item => {
+    item.addEventListener("click", (e) => { if (e.target.closest("[data-run-action]")) return; openAgentRunDetail(items.find(r => String(r.id) === item.dataset.run)); });
+  });
+}
+async function loadAgentRuns() {
+  const params = new URLSearchParams({ limit: String(RUN_FILTER.limit), offset: String(RUN_FILTER.offset) });
+  if (RUN_FILTER.status !== "all") params.set("status", RUN_FILTER.status);
+  if (RUN_FILTER.search) params.set("search", RUN_FILTER.search);
+  try {
+    const data = await apiJson("/api/agent-runs?" + params.toString());
+    RUNS = data.data || { items: [], total: 0 };
+    renderAgentRuns();
+  } catch (e) { showToast("运行记录加载失败：" + e.message); }
+}
+async function handleRunAction(id, action) {
+  if (action === "view") { const item = RUNS && RUNS.items ? RUNS.items.find(r => r.id === id) : RUNS.find(r => r.id === id); if (item) openAgentRunDetail(item); return; }
+  try {
+    if (action === "cancel") await apiJson("/api/agent-runs/" + id + "/cancel", { method: "POST" });
+    if (action === "rerun") { const data = await apiJson("/api/agent-runs/" + id + "/rerun", { method: "POST" }); showToast("已重新提交命令 #" + data.commandId); return; }
+    showToast("操作成功");
+    await loadAgentRuns();
+  } catch (e) { showToast("操作失败：" + e.message); }
+}
+
+function openAgentRunDetail(run) {
+  if (!run) return;
+  const overlay = document.getElementById("modalOverlay");
+  const stepHtml = (run.steps || []).map((s, i) => {
+    const metaLine = s.meta ? '<div class="agent-step-meta">' + escapeHtml(JSON.stringify(s.meta)) + '</div>' : '';
+    return '<div class="agent-step-detail">' +
+      '<div class="agent-step-head"><span>' + String(i + 1) + '. ' + escapeHtml(s.label || s.kind || '步骤') + '</span><span>' + escapeHtml(s.tool || s.kind || 'agent') + ' · ' + escapeHtml(s.status || '') + '</span></div>' +
+      metaLine +
+      '<pre class="draft-view">' + escapeHtml(s.output || s.input || '（无输出）') + '</pre></div>';
+  }).join('');
+  const stats = run.stats || {};
+  const context = run.context || {};
+  const statsHtml = Object.keys(stats).length ? '<div class="task-modal-section"><div class="tms-label">运行统计</div><div class="agent-step-meta">' + Object.entries(stats).map(([k, v]) => escapeHtml(k + ': ' + String(v))).join(' · ') + '</div></div>' : '';
+  const contextHtml = Object.keys(context).length ? '<div class="task-modal-section"><div class="tms-label">执行上下文</div><div class="agent-step-meta">' + escapeHtml(JSON.stringify(context)) + '</div></div>' : '';
+  document.getElementById("modalBody").innerHTML =
+    '<div class="task-modal-hero" style="--agent-color:#6366f1">' +
+      '<span class="detail-emoji">⚙</span>' +
+      '<div><div class="detail-name">Agent Run #' + escapeHtml(run.id) + '</div><div class="detail-role">' + escapeHtml(run.status || 'unknown') + ' · ' + escapeHtml(run.agentId || 'main') + ' · ' + escapeHtml(run.path || '') + '</div></div>' +
+      '<button class="modal-close" id="modalClose" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>' +
+    '</div>' +
+    (run.summary ? '<div class="task-modal-section"><div class="tms-label">摘要</div><div class="agent-step-meta">' + escapeHtml(run.summary) + '</div></div>' : '') +
+    statsHtml +
+    contextHtml +
+    '<div class="task-modal-section"><div class="tms-label">指令</div><pre class="draft-view">' + escapeHtml(run.command || '') + '</pre></div>' +
+    '<div class="task-modal-section"><div class="tms-label">执行步骤</div>' + (stepHtml || '<div class="ap-empty">暂无步骤</div>') + '</div>' +
+    (run.result ? '<div class="task-modal-section"><div class="tms-label">最终产出</div><pre class="draft-view">' + escapeHtml(run.result) + '</pre></div>' : '');
+  overlay.classList.add("show");
+  document.getElementById("modalClose").onclick = closeModal;
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); }, { once: true });
+}
+
+let ORDERS = { items: [], total: 0 };
+let ORDER_FILTER = { status: "all", search: "", offset: 0, limit: 50 };
+async function loadOrdersFromServer() {
+  const params = new URLSearchParams({ limit: String(ORDER_FILTER.limit), offset: String(ORDER_FILTER.offset) });
+  if (ORDER_FILTER.status !== "all") params.set("status", ORDER_FILTER.status);
+  if (ORDER_FILTER.search) params.set("search", ORDER_FILTER.search);
+  try {
+    const data = await apiJson("/api/orders?" + params.toString());
+    ORDERS = data.data || { items: [], total: 0 };
+    renderOrders();
+  } catch (e) { showToast("订单加载失败：" + e.message); }
+}
+function renderOrders() {
+  const statsEl = document.getElementById("orderStats");
+  const tableEl = document.getElementById("orderTable");
+  if (!statsEl || !tableEl) return;
+  apiJson("/api/orders/stats").then(d => {
+    const s = d.data || {};
+    const stats = [{ label: "订单总数", value: s.total || 0, color: "var(--brand)" }, { label: "今日订单", value: s.today || 0, color: "var(--success)" }, { label: "待处理", value: s.pending || 0, color: "var(--warning)" }, { label: "已发货", value: s.shipped || 0, color: "var(--info)" }];
+    statsEl.innerHTML = stats.map(x => `<div class="kb-stat" style="--stat-color:${safeCssColor(x.color)}"><div class="kb-stat-label">${escapeHtml(x.label)}</div><div class="kb-stat-value">${escapeHtml(x.value)}</div></div>`).join("");
+  }).catch(() => {});
+  const items = ORDERS.items || [];
+  tableEl.innerHTML = items.length ? `<table class="lead-table"><thead><tr><th>订单号</th><th>客户</th><th>商品</th><th>数量</th><th>金额</th><th>渠道</th><th>状态</th><th>物流</th><th></th></tr></thead><tbody>` + items.map(o => {
+    return `<tr><td>${escapeHtml(o.orderNo)}</td><td>${escapeHtml(o.customerName || "")}</td><td>${escapeHtml(o.product || "")}</td><td>${escapeHtml(o.qty)}</td><td>${escapeHtml(o.currency || "USD")} ${escapeHtml(o.amount)}</td><td>${escapeHtml(o.channel || "")}</td><td>${escapeHtml(o.status || "pending")}</td><td>${escapeHtml(o.trackingNo || "")}</td><td><button class="btn btn-sm" data-order-edit="${escapeAttr(o.id)}">编辑</button> <button class="btn btn-sm" data-order-delete="${escapeAttr(o.id)}">删除</button></td></tr>`;
+  }).join("") + "</tbody></table>" : `<div class="ap-empty">暂无订单</div>`;
+  tableEl.querySelectorAll("[data-order-edit]").forEach(b => b.onclick = () => openOrderModal(items.find(o => o.id === b.dataset.orderEdit)));
+  tableEl.querySelectorAll("[data-order-delete]").forEach(b => b.onclick = async () => { if (!confirm("确认删除该订单？")) return; try { await apiJson("/api/orders/" + b.dataset.orderDelete, { method: "DELETE" }); showToast("订单已删除"); await loadOrdersFromServer(); } catch (e) { showToast("删除失败：" + e.message); } });
+}
+function openOrderModal(order) {
+  const overlay = document.getElementById("modalOverlay");
+  const o = order || {};
+  document.getElementById("modalBody").innerHTML = `<div class="task-modal-hero" style="--agent-color:#60a5fa"><span class="detail-emoji">??</span><div><div class="detail-name">${escapeHtml(order ? "编辑订单" : "新增订单")}</div><div class="detail-role">本地订单</div></div><button class="modal-close" id="modalClose">?</button></div><div class="task-modal-section"><input id="orderFormOrderNo" placeholder="订单号" value="${escapeAttr(o.orderNo || "")}" /><input id="orderFormCustomer" placeholder="客户名称" value="${escapeAttr(o.customerName || "")}" /><input id="orderFormProduct" placeholder="商品" value="${escapeAttr(o.product || "")}" /><input id="orderFormQty" type="number" min="1" placeholder="数量" value="${escapeHtml(o.qty || 1)}" /><input id="orderFormAmount" type="number" step="0.01" placeholder="金额" value="${escapeHtml(o.amount || 0)}" /><input id="orderFormChannel" placeholder="渠道" value="${escapeAttr(o.channel || "")}" /><select id="orderFormStatus">${["pending","shipped","completed","cancelled"].map(s => `<option value="${s}" ${o.status === s ? "selected" : ""}>${s}</option>`).join("")}</select><input id="orderFormTracking" placeholder="物流单号" value="${escapeAttr(o.trackingNo || "")}" /></div><div class="task-modal-foot"><button class="btn btn-primary" id="orderSave">保存</button></div>`;
+  overlay.classList.add("show");
+  document.getElementById("modalClose").onclick = closeModal;
+  document.getElementById("orderSave").onclick = async () => {
+    const payload = { orderNo: document.getElementById("orderFormOrderNo").value.trim(), customerName: document.getElementById("orderFormCustomer").value.trim(), product: document.getElementById("orderFormProduct").value.trim(), qty: Number(document.getElementById("orderFormQty").value), amount: Number(document.getElementById("orderFormAmount").value), channel: document.getElementById("orderFormChannel").value.trim(), status: document.getElementById("orderFormStatus").value, trackingNo: document.getElementById("orderFormTracking").value.trim() };
+    if (!payload.orderNo) { showToast("订单号不能为空"); return; }
+    try { if (order) { await apiJson("/api/orders/" + order.id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); } else { await apiJson("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); } closeModal(); showToast("订单已保存"); await loadOrdersFromServer(); } catch (e) { showToast("保存失败：" + e.message); }
+  };
+}
+function bindOrderControls() {
+  const search = document.getElementById("orderSearch");
+  const status = document.getElementById("orderStatus");
+  const add = document.getElementById("addOrderBtn");
+  if (search) search.addEventListener("input", () => { ORDER_FILTER.search = search.value.trim(); ORDER_FILTER.offset = 0; loadOrdersFromServer(); });
+  if (status) status.addEventListener("change", () => { ORDER_FILTER.status = status.value; ORDER_FILTER.offset = 0; loadOrdersFromServer(); });
+  if (add) add.addEventListener("click", () => openOrderModal(null));
+}
 //  知识库（RAG）
 // ================================================================
 const KB_DOCS = [
@@ -1336,6 +1493,7 @@ async function loadDashboardData() {
   KPIS = d.kpis || [];
   LEADS = d.leads || [];
   REPORTS = d.reports || [];
+  RUNS = { items: d.runs || [], total: (d.runs || []).length };
   settingsState = d.settings || {};
   feedItems.length = 0;
   feedItems.push(...(d.activity || []));
@@ -1408,7 +1566,11 @@ async function loadApprovalsFromServer() {
     const resp = await fetch(`${API_BASE}/api/approvals`);
     const data = await resp.json();
     if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-    APPROVALS = (data.data || []).map(normalizeApproval);
+    const incoming = (data.data || []).map(normalizeApproval);
+    APPROVALS = incoming.map(n => {
+      const existing = APPROVALS.find(x => x.id === n.id);
+      return existing && existing._deciding ? { ...n, _deciding: true } : n;
+    });
     renderApprovalBadge();
     if (currentView === "approval") renderApprovals();
     return APPROVALS;
@@ -1418,7 +1580,7 @@ async function loadApprovalsFromServer() {
   }
 }
 
-// 真实执行 runCommand（覆盖模拟版，因 function 声明后定义者生效）
+// \u771F\u5B9E\u6267\u884C runCommand\uFF1A\u5C55\u793A\u540E\u7AEF Agent \u7F16\u6392\u6B65\u9AA4\uFF0C\u4E0D\u518D\u4F7F\u7528\u524D\u7AEF\u6A21\u62DF\u6B65\u9AA4
 async function runCommand(cmd, opts = {}) {
   const { agentIdx: presetAgent, tag: presetTag, color: presetColor } = opts;
   const route = routeCommand(cmd);
@@ -1426,8 +1588,7 @@ async function runCommand(cmd, opts = {}) {
   const tag = presetTag || route.tag;
   const color = presetColor || route.color;
 
-  // 写入指令回显
-  consoleState.steps = [{ label: "指令", text: cmd, tag: "输入", color: "#6366f1", done: true }];
+  consoleState.steps = [{ label: '\u6307\u4EE4', text: cmd, tag: '\u8F93\u5165', color: '#6366f1', done: true }];
   renderConsole();
   consoleState.running = true;
 
@@ -1437,56 +1598,57 @@ async function runCommand(cmd, opts = {}) {
   };
 
   try {
-    push("路由", "识别意图 → 调度 OpenClaw 运营总监", "路由", false);
-    await delay(300 + pseudoRand() * 300);
-    consoleState.steps[consoleState.steps.length - 1].done = true;
-    renderConsole();
-
-    push("执行", "指令已入队，后台执行中…", tag, false);
-    renderConsole();
-    pushFeed(tag, color, `提交异步指令：${cmd.slice(0, 30)}`);
+    push('\u8DEF\u7531', '\u5DF2\u63D0\u4EA4\u7ED9\u8FD0\u8425\u603B\u76D1\uFF0C\u540E\u7AEF Agent \u6B63\u5728\u62C6\u89E3\u4EFB\u52A1\u3002', '\u8DEF\u7531', true);
+    push('\u6267\u884C', '\u6307\u4EE4\u5DF2\u5165\u961F\uFF0C\u7B49\u5F85 Agent \u7F16\u6392\u5668\u8FD4\u56DE\u771F\u5B9E\u6B65\u9AA4\u3002', tag, false);
+    pushFeed(tag, color, `\u63D0\u4EA4\u5F02\u6B65\u6307\u4EE4\uFF1A${cmd.slice(0, 30)}`);
 
     const result = await callBackend(cmd, (job) => {
-      const execStep = consoleState.steps[consoleState.steps.length - 1];
-      if (execStep && execStep.label === "执行" && !execStep.done) {
-        execStep.text = job.status === "queued" ? `指令 #${job.id} 已入队…` : `指令 #${job.id} OpenClaw 后台执行中…`;
+      if (job.run && Array.isArray(job.run.steps)) {
+        const base = [{ label: '\u6307\u4EE4', text: cmd, tag: '\u8F93\u5165', color: '#6366f1', done: true }];
+        for (const s of job.run.steps) {
+          base.push({
+            label: s.label || s.kind || '\u6B65\u9AA4',
+            text: s.output || s.input || '\u6267\u884C\u4E2D\u2026',
+            tag: s.tool || s.kind || 'agent',
+            color: '#6366f1',
+            done: s.status === 'done' || s.status === 'error',
+          });
+        }
+        consoleState.steps = base;
         renderConsole();
       }
     });
 
-    // 完成执行步骤
-    const execStep = consoleState.steps[consoleState.steps.length - 1];
-    execStep.done = true;
-    execStep.text = result.needsApproval
-      ? "已生成执行方案，等待人工审批（对外动作不自动执行）"
-      : "执行完成";
+    if (!consoleState.steps.some(s => s.kind === 'tool' || s.tool)) {
+      const execStep = consoleState.steps[consoleState.steps.length - 1];
+      execStep.done = true;
+      execStep.text = result.needsApproval
+        ? '\u5DF2\u751F\u6210\u6267\u884C\u65B9\u6848\uFF0C\u7B49\u5F85\u4EBA\u5DE5\u5BA1\u6279\uFF08\u5BF9\u5916\u52A8\u4F5C\u4E0D\u81EA\u52A8\u6267\u884C\uFF09'
+        : 'Agent \u7F16\u6392\u6267\u884C\u5B8C\u6210';
+    }
     renderConsole();
 
-    // 审批闸门：真实审批条目
     if (result.approval) {
       const ap = mergeRealApproval(result.approval);
-      push("审批", `已生成审批条目 ${ap ? ap.id : ""}：${result.approval.title}`, "审批", true);
+      push('\u5BA1\u6279', `\u5DF2\u751F\u6210\u5BA1\u6279\u6761\u76EE ${ap ? ap.id : ''}\uFF1A${result.approval.title}`, '\u5BA1\u6279', true);
       renderConsole();
-      showToast(`⚡ 检测到对外动作，已生成审批条目 ${result.approval.id}`);
+      showToast(`\u68C0\u6D4B\u5230\u5BF9\u5916\u52A8\u4F5C\uFF0C\u5DF2\u751F\u6210\u5BA1\u6279\u6761\u76EE ${result.approval.id}`);
     }
 
-    // 最终产出：真实结果写入报告（完整内容，不截断）
-    push("产出", result.content, "结果", true);
-    addReport({ agent: agentIdx, title: cmd.slice(0, 24) + (cmd.length > 24 ? "…" : ""), tag, color, content: result.content });
-
+    push('\u4EA7\u51FA', result.content, '\u7ED3\u679C', true);
+    addReport({ agent: agentIdx, title: cmd.slice(0, 24) + (cmd.length > 24 ? '\u2026' : ''), tag, color, content: result.content });
+    try { await loadDashboardData(); renderAgentRuns(); } catch (e) { showToast("?????????" + e.message); }
   } catch (e) {
-    push("错误", `执行失败：${e.message}`, "错误", true);
-    showToast(`❌ 执行失败：${e.message}`);
-    if (e.message.includes("后端") || e.message.includes("fetch")) {
-      push("降级", "后端不可用，请确认 server 服务已启动 (node server/index.js)", "警告", true);
+    push('\u9519\u8BEF', `\u6267\u884C\u5931\u8D25\uFF1A${e.message}`, '\u9519\u8BEF', true);
+    showToast(`\u6267\u884C\u5931\u8D25\uFF1A${e.message}`);
+    if (e.message.includes('\u540E\u7AEF') || e.message.includes('fetch')) {
+      push('\u964D\u7EA7', '\u540E\u7AEF\u4E0D\u53EF\u7528\uFF0C\u8BF7\u786E\u8BA4 server \u670D\u52A1\u5DF2\u542F\u52A8 (node server/index.js)', '\u8B66\u544A', true);
     }
   } finally {
     consoleState.running = false;
     renderConsole();
   }
 }
-
-// ================================================================
 //  知识库检索（kb-query）：客服 RAG 问答
 // ================================================================
 async function runKbQuery(question) {
@@ -1555,7 +1717,9 @@ async function bootstrap() {
   renderKPI();
   renderAgentGrid();
   renderFeed();
+
   renderReports();
+  await loadAgentRuns();
   renderQuickCmds();
   renderConsole();
   renderApprovalBadge();
@@ -1563,6 +1727,8 @@ async function bootstrap() {
   initKnowledge();
   initSettings();
   bindExportLeads();
+  bindOrderControls();
+  loadOrdersFromServer();
   await loadApprovalsFromServer();
   await loadKBFilesFromServer();
 }

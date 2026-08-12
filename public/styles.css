@@ -1160,6 +1160,13 @@ button { font-family: inherit; }
 .g-warm { --gc: #fbbf24; }
 .g-cold { --gc: #7e85a3; }
 
+
+.feed-actions { display: inline-flex; gap: 6px; margin-left: 8px; vertical-align: middle; }
+.feed-actions .btn { white-space: nowrap; }
+.feed li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.feed li > span:first-child { flex: 0 0 auto; }
+.feed-text { flex: 1 1 280px; }
+#runSearch, #runStatus { background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--r-sm); color: var(--text-1); font-family: inherit; font-size: 12px; padding: 6px 10px; min-height: 32px; }
 .feed-empty { color: var(--text-4); font-size: 12px; padding: 12px 0; }
 
 /* ============================================================

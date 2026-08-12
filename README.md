@@ -35,6 +35,17 @@ docs/             # 设计文档
 skills/           # 自定义技能（SKILL.md）
 ```
 
+## Agent 编排器（v0.2）
+
+后端 `/api/command` 不再只是单次 LLM 问答，而是执行真实 Agent 编排：
+
+1. 运营总监路由：按指令关键词选择数字员工
+2. 任务拆解：生成 `agent_runs` + `agent_steps`
+3. 工具调用：知识库检索 / 客服答复 / Listing / 本地化 / 合规审查 / 线索打标 / 运营报告
+4. 真实状态：前端轮询命令详情，展示后端落库的执行步骤
+5. 审批闸门：对外动作仍生成草稿，等待人工确认后归档
+
+当前工具均为本地能力，不真实调用微信 / WhatsApp / Instagram / X / ERP 等外部平台。
 ## 配置
 
 所有配置走环境变量（见 .env.example）。常用：
@@ -45,7 +56,7 @@ skills/           # 自定义技能（SKILL.md）
 | SESSION_SECRET | replace-me | 会话签名密钥；生产环境必须改 |
 | CORS_ORIGIN | 空 | 为空时不启用 CORS；如需跨域只填精确白名单 |
 | ADMIN_EMAIL / ADMIN_PASSWORD | 空 | 数据库无用户时自动创建首个 admin；公开注册已关闭，空库未配置则无法登录 |
-| OPENCLAW_DIRECT_MODEL | shuyanai/qwen3.6-flash | 快路径模型，形如 <provider>/<model> |
+| OPENCLAW_DIRECT_MODEL | deepseek/deepseek-chat | 快路径模型，形如 <provider>/<model> |
 | OPENCLAW_DIRECT_TIMEOUT_MS | 30000 | 直连超时 |
 | OPENCLAW_GATEWAY_URL | http://127.0.0.1:18789 | Gateway 兜底地址 |
 | OPENCLAW_PROVIDER_BASE_URL | (自动读 models.json) | 直连 provider baseUrl |
@@ -58,6 +69,16 @@ provider 凭据留空时，自动从 ~/.openclaw/agents/main/agent/models.json �
 - Gateway 已启动且 ~/.openclaw/openclaw.json 里 gateway.auth.token 可读（留空 OPENCLAW_GATEWAY_TOKEN 时自动读）
 - models.json 里至少配了一个非 reasoning 模型作快路径（默认用 deepseek 官方 deepseek-chat）
 
+
+## Feishu（飞书）接入
+
+- 使用企业自建应用 + 机器人 + 长连接事件订阅
+- 配置 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`
+- 服务启动后自动建立飞书长连接，无需公网回调地址
+- 飞书消息会进入 Agent 编排器；普通咨询直接回复，对外动作生成审批草稿等待人工确认
+- API：
+  - `GET /api/integrations/feishu`：连接状态
+  - `POST /api/integrations/feishu/send`：手动发送文本（需要 chatId）
 ## 常见问题
 
 Q: 指令很慢 / 超时？

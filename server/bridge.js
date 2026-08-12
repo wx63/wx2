@@ -141,7 +141,7 @@ async function runDirect(prompt, opts = {}) {
     }
     const content = raw.choices?.[0]?.message?.content || '';
     if (!content.trim()) {
-      return { ok: false, error: '模型未返回内容', _fallbackable: false };
+      return { ok: false, error: '模型未返回内容', _fallbackable: true };
     }
     const u = raw.usage || {};
     return {
@@ -232,4 +232,88 @@ async function runAgent(prompt, opts = {}) {
   return direct;
 }
 
-module.exports = { runAgent, detectAction, GATEWAY_URL, DIRECT_MODEL, PROVIDER };
+/**
+ * runAgentTools - OpenAI-style tool-calling loop over the direct provider.
+ */
+async function runAgentTools(prompt, tools, opts = {}) {
+  const maxRounds = Math.max(1, Math.min(12, opts.maxRounds || 8));
+  const maxTokens = Number(process.env.OPENCLAW_DIRECT_MAX_TOKENS || 4000);
+  const timeoutPerRound = +process.env.DIRECT_TIMEOUT_MS || DIRECT_TIMEOUT_MS;
+  if (!PROVIDER.baseUrl || !PROVIDER.apiKey) return { ok: false, error: 'tool provider not configured', _fallbackable: true };
+  const slash = DIRECT_MODEL.indexOf('/');
+  const modelId = slash >= 0 ? DIRECT_MODEL.slice(slash + 1) : DIRECT_MODEL;
+  let messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ];
+  const steps = [];
+  const maxToolOutput = Number(opts.maxToolOutput || 4000);
+
+  async function callOnce(currentMessages) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutPerRound);
+    const body = { model: modelId, messages: currentMessages, tools, tool_choice: 'auto', max_tokens: maxTokens, stream: false };
+    try {
+      const resp = await fetch(`${PROVIDER.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${PROVIDER.apiKey}` },
+        body: Buffer.from(JSON.stringify(body), 'utf8'),
+        signal: ctrl.signal,
+      });
+      const raw = await resp.json();
+      if (!resp.ok) return { ok: false, error: raw.error?.message || `HTTP ${resp.status}`, _fallbackable: resp.status >= 500 || resp.status === 429 };
+      return { ok: true, raw };
+    } catch (e) {
+      const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
+      return { ok: false, error: aborted ? 'tool call timeout' : e.message, _fallbackable: aborted || e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND' };
+    } finally { clearTimeout(timer); }
+  }
+
+  function compactMessages() {
+    const keepRecent = 4;
+    const messagesCopy = [...messages];
+    for (let i = 2; i < messagesCopy.length - 2; i++) {
+      const age = messagesCopy.length - i;
+      if (age > keepRecent && messagesCopy[i].role === 'tool' && messagesCopy[i].content && messagesCopy[i].content.length > 500) {
+        messagesCopy[i] = { ...messagesCopy[i], content: messagesCopy[i].content.slice(0, 500) + '...[truncated]' };
+      }
+    }
+    return messagesCopy;
+  }
+
+  for (let round = 0; round < maxRounds; round++) {
+    const once = await callOnce(messages);
+    if (!once.ok) return once;
+    const message = once.raw.choices?.[0]?.message || {};
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    if (!toolCalls.length) {
+      const content = message.content || '';
+      return { ok: true, content, steps, raw: once.raw, model: DIRECT_MODEL, path: 'agentic' };
+    }
+    messages.push({ role: 'assistant', content: message.content || '', tool_calls: toolCalls });
+    for (const call of toolCalls) {
+      const name = call.function?.name || '';
+      let args = {};
+      try { args = JSON.parse(call.function?.arguments || '{}'); } catch (_) { args = {}; }
+      let output = '';
+      let error = '';
+      if (typeof opts.executor === 'function') {
+        try {
+          const res = await opts.executor(name, args);
+          output = String(res?.output ?? res ?? '').slice(0, maxToolOutput);
+          error = res?.error ? String(res.error).slice(0, 1000) : '';
+        } catch (e) { error = e.message; }
+      } else {
+        error = 'executor not configured';
+      }
+      const toolResult = error ? `ERROR: ${error}` : output;
+      messages.push({ role: 'tool', tool_call_id: call.id || '', content: toolResult.slice(0, maxToolOutput) });
+      messages = compactMessages();
+      steps.push({ tool: name, args, output: toolResult.slice(0, maxToolOutput), error });
+      if (typeof opts.onStep === 'function') opts.onStep({ tool: name, args, output: toolResult, error });
+    }
+  }
+  return { ok: false, error: 'max rounds reached', _fallbackable: true };
+}
+
+module.exports = { runAgent, runAgentTools, detectAction, GATEWAY_URL, DIRECT_MODEL, PROVIDER };

@@ -56,7 +56,11 @@
           审批中心
           <span class="nav-badge">0</span>
         </a>
-        <a class="nav-item" data-view="leads">
+        
+        <a class="nav-item" data-view="orders">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          订单管理
+        </a><a class="nav-item" data-view="leads">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           线索管理
         </a>
@@ -149,6 +153,24 @@
           </div>
           <ul class="feed" id="reportList"></ul>
         </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-head">
+            <div class="ph-left"><span class="ph-dot"></span><h2>Agent 运行轨迹</h2></div>
+            <span class="hint">真实 agent_runs / agent_steps 执行记录</span>
+          </div>
+
+            <div class="lead-toolbar">
+              <input id="runSearch" type="search" placeholder="搜索命令/摘要" />
+              <select id="runStatus">
+                <option value="all">全部状态</option>
+                <option value="ok">成功</option>
+                <option value="running">执行中</option>
+                <option value="error">失败</option>
+                <option value="cancelled">已取消</option>
+              </select>
+            </div>          <ul class="feed" id="agentRunList"></ul>
+        </div>
       </section>
 
       <!-- 视图：单个 Agent 详情 -->
@@ -198,7 +220,22 @@
       </section>
 
       <!-- 视图：知识库 -->
-      <section class="view" id="view-knowledge">
+            <section class="view" id="view-orders">
+        <div class="kb-stats" id="orderStats"></div>
+        <div class="panel">
+          <div class="panel-head">
+            <div class="ph-left"><span class="ph-dot"></span><h2>本地订单</h2></div>
+            <div class="lead-toolbar">
+              <input id="orderSearch" type="search" placeholder="搜索订单号/客户/商品" />
+              <select id="orderStatus"><option value="all">全部状态</option><option value="pending">待处理</option><option value="shipped">已发货</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select>
+              <button class="btn btn-primary btn-sm" id="addOrderBtn">新增订单</button>
+            </div>
+          </div>
+          <div class="lead-table-wrap" id="orderTable"></div>
+        </div>
+      </section>
+
+<section class="view" id="view-knowledge">
         <div class="kb-stats" id="kbStats"></div>
         <div class="panel">
           <div class="panel-head">

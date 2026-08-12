@@ -10,7 +10,7 @@
 ## 目录约定
 
 ```
-D:\基于OpenClaw构建跨境电商智能体\
+E:\基于OpenClaw构建跨境电商智能体\
 ├── public\                             # 前端控制台静态资产（唯一对外静态目录）
 │   ├── index.html / app.js / styles.css
 │   └── login.html / login.js / login.css
@@ -34,7 +34,7 @@ D:\基于OpenClaw构建跨境电商智能体\
 ## 启动方式
 
 - 前端：通过后端访问 `http://localhost:3001/`；不要直接双击 HTML，业务 API 依赖同源会话
-- AI 助手：Claude Code / Codex 在本目录内运行（`cd D:\基于OpenClaw构建跨境电商智能体`）
+- AI 助手：Claude Code / Codex 在本目录内运行（`cd E:\基于OpenClaw构建跨境电商智能体`）
 - OpenClaw：主 agent 常驻，通过会话指挥
 
 ## 当前状态（2026-07-31）
@@ -51,4 +51,6 @@ D:\基于OpenClaw构建跨境电商智能体\
 - [ ] lead-scoring 技能（Phase 2）
 - [ ] listing-writer / compliance-check 技能（Phase 3）
 - [x] 前端知识库页接后端真实文件列表（含上传/删除，md/txt 进 RAG）
+- [x] Agent 编排器 v0.2：真实路由、任务拆解、工具调用、agent_runs/agent_steps 落库、前端展示真实执行轨迹
+- [ ] 外部平台 API 对接（微信 / WhatsApp / Instagram / X / ERP），等账号与凭据提供后接入
 - [ ] OpenClaw 上云部署
