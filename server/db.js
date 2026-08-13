@@ -44,8 +44,8 @@ db.exec(`
     password_hash  TEXT NOT NULL,
     role           TEXT NOT NULL DEFAULT 'operator',
     status         TEXT NOT NULL DEFAULT 'active',
-    created_at     TEXT DEFAULT (datetime('now')),
-    updated_at     TEXT DEFAULT (datetime('now')),
+    created_at     TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at     TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     last_login_at  TEXT
   );
 
@@ -65,7 +65,7 @@ db.exec(`
     ip             TEXT,
     user_agent     TEXT,
     metadata_json  TEXT,
-    created_at     TEXT DEFAULT (datetime('now')),
+    created_at     TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
   CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
@@ -87,7 +87,7 @@ db.exec(`
     approval_id  TEXT,
     prompt_tokens   INTEGER,
     completion_tokens INTEGER,
-    created_at   TEXT DEFAULT (datetime('now')),
+    created_at   TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
   CREATE INDEX IF NOT EXISTS idx_commands_created ON commands(created_at);
@@ -103,7 +103,7 @@ db.exec(`
     risk            TEXT,
     created_by      INTEGER,
     decided_by      INTEGER,
-    created_at      TEXT DEFAULT (datetime('now')),
+    created_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     decided_at      TEXT,
     executed_at     TEXT,
     execute_status  TEXT,
@@ -127,7 +127,7 @@ db.exec(`
     skills_json     TEXT NOT NULL DEFAULT '[]',
     templates_json  TEXT NOT NULL DEFAULT '[]',
     sort_order      INTEGER NOT NULL DEFAULT 0,
-    updated_at      TEXT DEFAULT (datetime('now'))
+    updated_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );
 
   CREATE TABLE IF NOT EXISTS kpis (
@@ -140,7 +140,7 @@ db.exec(`
     color       TEXT,
     spark_json  TEXT NOT NULL DEFAULT '[]',
     sort_order  INTEGER NOT NULL DEFAULT 0,
-    updated_at  TEXT DEFAULT (datetime('now'))
+    updated_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );
 
   CREATE TABLE IF NOT EXISTS activity_feed (
@@ -149,7 +149,7 @@ db.exec(`
     color       TEXT,
     text        TEXT NOT NULL,
     created_by  INTEGER,
-    created_at  TEXT DEFAULT (datetime('now')),
+    created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     FOREIGN KEY(created_by) REFERENCES users(id)
   );
   CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_feed(created_at);
@@ -165,7 +165,7 @@ db.exec(`
     score        INTEGER,
     time         TEXT,
     status       TEXT NOT NULL DEFAULT 'new',
-    created_at   TEXT DEFAULT (datetime('now')),
+    created_at   TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     promoted_at  TEXT,
     promoted_by  INTEGER,
     FOREIGN KEY(promoted_by) REFERENCES users(id)
@@ -182,7 +182,7 @@ db.exec(`
     content     TEXT,
     command_id  INTEGER,
     created_by  INTEGER,
-    created_at  TEXT DEFAULT (datetime('now')),
+    created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     FOREIGN KEY(created_by) REFERENCES users(id),
     FOREIGN KEY(command_id) REFERENCES commands(id)
   );
@@ -203,8 +203,8 @@ db.exec(`
     tracking_no   TEXT,
     carrier       TEXT,
     note          TEXT,
-    created_at    TEXT DEFAULT (datetime('now')),
-    updated_at    TEXT DEFAULT (datetime('now'))
+    created_at    TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at    TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );
   CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
   CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
@@ -213,7 +213,7 @@ db.exec(`
     user_id     INTEGER NOT NULL,
     key         TEXT NOT NULL,
     value_json  TEXT NOT NULL,
-    updated_at  TEXT DEFAULT (datetime('now')),
+    updated_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     PRIMARY KEY (user_id, key),
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
@@ -234,8 +234,8 @@ db.exec(`
     summary     TEXT,
     context_json TEXT,
     stats_json  TEXT,
-    created_at  TEXT DEFAULT (datetime('now')),
-    updated_at  TEXT DEFAULT (datetime('now')),
+    created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     finished_at TEXT,
     FOREIGN KEY(command_id) REFERENCES commands(id),
     FOREIGN KEY(user_id) REFERENCES users(id)
@@ -257,7 +257,7 @@ db.exec(`
     meta_json   TEXT,
     status      TEXT NOT NULL DEFAULT 'pending',
     duration_ms INTEGER,
-    created_at  TEXT DEFAULT (datetime('now')),
+    created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     FOREIGN KEY(run_id) REFERENCES agent_runs(id)
   );
   CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id);

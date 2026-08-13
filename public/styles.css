@@ -619,7 +619,9 @@ button { font-family: inherit; }
 @media (max-width: 760px) {
   .sidebar { display: none; }
   .agent-grid { grid-template-columns: 1fr; }
-  .command-bar { display: none; }
+  .topbar { flex-wrap: wrap; gap: 10px; }
+  .command-bar { flex: 1 1 100%; max-width: none; order: 3; }
+  .topbar-right { margin-left: auto; }
   .view { padding: 18px; }
   .command-drawer {
     left: 12px;

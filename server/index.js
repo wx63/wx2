@@ -15,6 +15,7 @@ const rateLimit = require('express-rate-limit');
 const { runAgent, runAgentTools, detectAction } = require('./bridge');
 const { loadKnowledgeBase, retrieve, answer, fileStats } = require('./kb');
 const feishu = require('./feishu');
+const { lookupPrice } = require('./price-lookup');
 const {
   db,
   DATA_DIR,
@@ -286,8 +287,27 @@ function safeToolOutput(result) {
   return { ok: true, output: result.content || result.answer || JSON.stringify(result) };
 }
 
+const PRICE_QUERY_RE = /最低价|价格|多少钱|什么价|什么价格|报价|现价|售价|卖多少|降价|查价|行情|价位|cheap|lowest|price/i;
+const NON_PRICE_LOOKUP_RE = /价格政策|价格体系|定价策略|价格表|price policy|价格区间策略/i;
+
+function isPriceLookupCommand(command) {
+  const text = String(command || '').trim();
+  if (!text || text.length > 200) return false;
+  if (NON_PRICE_LOOKUP_RE.test(text)) return false;
+  return PRICE_QUERY_RE.test(text);
+}
+
 // ========== Agent tool registry (single source) ==========
 const AGENT_TOOL_DEFS = [
+  {
+    name: 'price_lookup', label: '\u5b9e\u65f6\u67e5\u4ef7', description: '\u67e5\u8be2\u4efb\u610f\u5546\u54c1\u5f53\u524d\u5168\u7f51\u6298\u6263\u4ef7/\u5b9e\u65f6\u6700\u4f4e\u4ef7\uff0c\u652f\u6301\u624b\u673a/\u6570\u7801/\u5bb6\u7535/\u65e5\u7528\u7b49\u5546\u54c1\u5173\u952e\u8bcd',
+    schema: { type: 'object', properties: { query: { type: 'string', description: '\u5546\u54c1\u5173\u952e\u8bcd\uff0c\u4f8b\u5982 iPhone 17 256GB\u3001\u6234\u68ee\u5439\u98ce\u673a\u3001SONY WH-1000XM5' }, max_results: { type: 'integer', description: '\u6700\u591a\u8fd4\u56de\u6761\u6570' } }, required: ['query'] },
+    prompt: 'price_lookup', handler: async (args, meta) => {
+      const res = await lookupPrice(args.query || meta.command);
+      if (!res.ok) return { output: res.error || '\u5b9e\u65f6\u67e5\u4ef7\u5931\u8d25' };
+      return { output: res.output };
+    },
+  },
   {
     name: 'kb_search', label: '知识库检索', description: '检索本地知识库（尺码表/退换货/FAQ），返回带来源片段',
     schema: { type: 'object', properties: { question: { type: 'string' } }, required: ['question'] },
@@ -406,6 +426,12 @@ async function runPlannedStep(step, meta) {
   if (step.tool === 'greeting') {
     return { ok: true, output: 'Hello! I am your cross-border ecommerce assistant. Ask about sizing, returns, logistics, research, listings, or compliance.', meta: { type: 'greeting' } };
   }
+  if (step.tool === 'price_lookup') {
+    const query = step.args && step.args.query ? step.args.query : command;
+    const price = await lookupPrice(query);
+    if (!price.ok) return { ok: false, error: price.error || '\u5b9e\u65f6\u67e5\u4ef7\u5931\u8d25' };
+    return { ok: true, output: price.output, meta: { source: 'price_lookup', fetchedAt: price.data && price.data.fetchedAt } };
+  }
   if (step.tool === 'approval_draft') {
     const prompt = `You are a cross-border ecommerce approval assistant. This task is an external action, do not execute it.\nOutput an approval-ready plan:\n- Target platform/object\n- Content draft\n- Risk notes\n- Items requiring manual confirmation\n\nTask: ${command}`;
     return safeToolOutput(await runAgentModel(prompt, meta));
@@ -418,6 +444,11 @@ async function runPlannedStep(step, meta) {
 function buildAgentPlan(command, route) {
   const lower = String(command || '').toLowerCase();
   const plan = [];
+  if (isPriceLookupCommand(command)) {
+    plan.push({ kind: 'tool', label: '实时查价', tool: 'price_lookup', args: { query: command }, color: '#f59e0b' });
+    plan.push({ kind: 'output', label: 'Output', tool: null, args: {}, color: route.color });
+    return plan;
+  }
   plan.push({ kind: 'plan', label: 'Route', tool: 'route', agentName: route.name, childCount: 3, color: route.color });
   if (route.greeting) {
     plan.push({ kind: 'tool', label: 'Greeting', tool: 'greeting', args: { text: command }, color: '#34d399' });
@@ -471,14 +502,15 @@ async function runAgenticCommand(meta) {
   const startedAt = Date.now();
   const stats = { steps: 0, tools: 0, retries: 0, failedSteps: 0 };
   const kbContext = agenticPreloadContext(command);
-  const prompt = `${command}\n\n${kbContext ? '知识库上下文：\n' + kbContext : ''}`;
+  const priceHint = isPriceLookupCommand(command) ? '\n\n[工具提示] 这是实时价格查询，请调用 price_lookup 工具，不要只凭模型记忆回答。\n' : '';
+  const prompt = `${command}\n\n${kbContext ? '知识库上下文：\n' + kbContext + '\n\n' : ''}${priceHint}`.trim();
   const maxRounds = Math.max(1, Math.min(12, Number(process.env.AGENT_MAX_ROUNDS || 8)));
   const result = await runAgentTools(prompt, TOOL_SCHEMAS, {
     maxRounds,
     sessionId: meta.sessionId,
     executor: async (name, args) => {
       const def = AGENT_TOOL_DEFS.find(d => d.name === name);
-      if (!def) return { output: `???? ${name}` };
+      if (!def) return { output: '未知工具: ' + name };
       return def.handler(args || {}, meta);
     },
     onStep: async (step) => {
@@ -496,7 +528,7 @@ async function runAgenticCommand(meta) {
   stats.durationMs = Date.now() - startedAt;
   if (!result.ok) return { ok: false, error: result.error, stats };
   if ((result.steps || []).length && (result.steps || []).every(s => s.error)) {
-    return { ok: false, error: '????????', _fallbackable: true, stats };
+    return { ok: false, error: '所有工具调用失败，已回退规则管道', _fallbackable: true, stats };
   }
   if (detectAction(command) && !(result.steps || []).some(s => s.tool === 'approval_draft')) {
     const def = AGENT_TOOL_DEFS.find(d => d.name === 'approval_draft');
@@ -510,6 +542,20 @@ async function runAgenticCommand(meta) {
     stats.steps += 1;
     stats.tools += 1;
     result.steps.push({ tool: 'approval_draft', args: { task: command }, output: forced.output, error: '' });
+    result.content = forced.output || result.content;
+  }
+  if (isPriceLookupCommand(command) && !(result.steps || []).some(s => s.tool === 'price_lookup')) {
+    const def = AGENT_TOOL_DEFS.find(d => d.name === 'price_lookup');
+    const forced = def ? await def.handler({ query: command }, meta) : { output: '' };
+    const seq = stats.steps;
+    appendAgentStep({
+      runId, seq, kind: 'tool', label: 'price_lookup', tool: 'price_lookup',
+      args: { query: command }, input: command, output: truncateText(forced.output || '', 20000),
+      meta: { agentic: true, forced: true }, status: 'done', durationMs: 0,
+    });
+    stats.steps += 1;
+    stats.tools += 1;
+    result.steps.push({ tool: 'price_lookup', args: { query: command }, output: forced.output, error: '' });
     result.content = forced.output || result.content;
   }
   finishAgentRun(runId, {
@@ -859,7 +905,7 @@ app.get('/api/orders/stats', requireAuth, (req, res) => {
 
 app.post('/api/orders', requireRole('operator', 'admin'), (req, res) => {
   const data = req.body || {};
-  if (!data.orderNo) return res.status(400).json({ ok: false, error: '?? orderNo' });
+  if (!data.orderNo) return res.status(400).json({ ok: false, error: '缺少 orderNo' });
   try {
     const order = addOrder(data);
     addActivity({ tag: '\u8ba2\u5355', color: '#60a5fa', text: '\u8ba2\u5355\u53d8\u66f4 ' + order.orderNo, userId: req.user.id });
@@ -873,14 +919,14 @@ app.post('/api/orders', requireRole('operator', 'admin'), (req, res) => {
 app.patch('/api/orders/:id', requireRole('operator', 'admin'), (req, res) => {
   const order = updateOrder(req.params.id, req.body || {});
   if (!order) return res.status(404).json({ ok: false, error: '\u8ba2\u5355\u4e0d\u5b58\u5728' });
-  addActivity({ tag: '??', color: '#60a5fa', text: '???? ' + order.orderNo, userId: req.user.id });
+  addActivity({ tag: '订单', color: '#60a5fa', text: '订单更新 ' + order.orderNo, userId: req.user.id });
   audit(req, 'order_update', 'order', order.id);
   res.json({ ok: true, data: order });
 });
 
 app.delete('/api/orders/:id', requireRole('operator', 'admin'), (req, res) => {
   const ok = deleteOrder(req.params.id);
-  if (!ok) return res.status(404).json({ ok: false, error: '?????' });
+  if (!ok) return res.status(404).json({ ok: false, error: '订单不存在' });
   audit(req, 'order_delete', 'order', req.params.id);
   res.json({ ok: true });
 });
@@ -1106,7 +1152,7 @@ app.post('/api/agent-runs/:id/cancel', requireRole('operator', 'admin'), (req, r
 
 app.post('/api/agent-runs/:id/rerun', requireRole('operator', 'admin'), (req, res) => {
   const run = getAgentRun(Number(req.params.id));
-  if (!run) return res.status(404).json({ ok: false, error: 'Agent ?????' });
+  if (!run) return res.status(404).json({ ok: false, error: 'Agent 运行记录不存在' });
   if (req.user.role !== 'admin' && run.userId != null && run.userId !== req.user.id) return res.status(403).json({ ok: false, error: '\u6743\u9650\u4e0d\u8db3' });
   const sessionId = run.context && run.context.sessionId ? run.context.sessionId : 'user-' + req.user.id;
   const needsApproval = !!detectAction(run.command);

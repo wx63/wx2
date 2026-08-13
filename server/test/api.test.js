@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const http = require('node:http');
 
 process.env.NODE_ENV = 'test';
 process.env.PORT = '0';
@@ -30,6 +31,7 @@ fs.writeFileSync(path.join(process.env.OPENCLAW_KB_DIR, '退换货政策.md'), '
 
 const app = require('../index');
 const dbmod = require('../db');
+const bridge = require('../bridge');
 const bcrypt = require('bcryptjs');
 
 function makeServer() {
@@ -281,7 +283,7 @@ test('feishu integration status endpoint is available', async () => {
 });
 
 test('agentic fallback path remains compatible', async () => {
-  const result = await app.executeAgentCommand({ commandId: null, userId: 1, command: '??????', agentId: 'main', sessionId: 'test-agentic' });
+  const result = await app.executeAgentCommand({ commandId: null, userId: 1, command: '生成运营报告', agentId: 'main', sessionId: 'test-agentic' });
   assert.equal(result.path, 'agentic_fallback');
   assert.equal(typeof result.ok, 'boolean');
   assert.ok(result.runId > 0);
@@ -294,4 +296,93 @@ test('agent runs endpoint lists persisted runs', async () => {
   const body = await resp.json();
   assert.ok(Array.isArray(body.data.items));
   assert.ok(body.data.items.length >= 1);
+});
+
+// ---------- agentic 成功路径防回归测试（本地 mock 模型服务器，走真实 runAgentTools 循环） ----------
+
+function createMockModelServer(opts = {}) {
+  return new Promise(resolve => {
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}');
+          const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0;
+          const hasToolResults = Array.isArray(parsed.messages) && parsed.messages.some(m => m.role === 'tool');
+          let status = 200;
+          let payload;
+          if (hasTools && !hasToolResults) {
+            payload = { choices: [{ message: { role: 'assistant', content: null, tool_calls: opts.toolCalls } }] };
+          } else if (hasTools) {
+            payload = { choices: [{ message: { role: 'assistant', content: opts.finalContent || '最终产出' } }] };
+          } else if (opts.failPlain) {
+            status = 500;
+            payload = { error: { message: 'mock 500' } };
+          } else {
+            payload = { choices: [{ message: { role: 'assistant', content: opts.plainContent || '本地模拟工具输出' } }] };
+          }
+          res.writeHead(status, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(payload));
+        } catch (e) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: e.message } }));
+        }
+      });
+    });
+    server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port }));
+  });
+}
+
+const MOCK_RESEARCH_CALL = { id: 'call_research', type: 'function', function: { name: 'research', arguments: JSON.stringify({ topic: '竞品调研' }) } };
+const MOCK_LISTING_CALL = { id: 'call_listing', type: 'function', function: { name: 'listing', arguments: JSON.stringify({ product: '宠物饮水机' }) } };
+const MOCK_COMPLIANCE_CALL = { id: 'call_compliance', type: 'function', function: { name: 'compliance', arguments: JSON.stringify({ items: '文案' }) } };
+
+async function withMockModel(run, opts) {
+  const { server, port } = await createMockModelServer(opts);
+  const originalBase = bridge.PROVIDER.baseUrl;
+  bridge.PROVIDER.baseUrl = `http://127.0.0.1:${port}/v1`;
+  try {
+    return await run();
+  } finally {
+    bridge.PROVIDER.baseUrl = originalBase;
+    server.close();
+  }
+}
+
+test('agentic toolchain success path persists real tool steps', async () => {
+  await withMockModel(async () => {
+    const result = await app.executeAgentCommand({ commandId: null, userId: 1, command: '调研竞品写 listing 再做合规审查', agentId: 'main', sessionId: 'test-agentic-ok' });
+    assert.equal(result.path, 'agentic');
+    assert.equal(result.ok, true);
+    assert.equal(result.content, '最终产出');
+    const run = dbmod.getAgentRun(result.runId);
+    assert.equal(run.status, 'ok');
+    const toolSteps = run.steps.filter(s => s.kind === 'tool' && s.meta && s.meta.agentic === true);
+    assert.equal(toolSteps.length, 3);
+    assert.deepEqual(toolSteps.map(s => s.tool), ['research', 'listing', 'compliance']);
+  }, { toolCalls: [MOCK_RESEARCH_CALL, MOCK_LISTING_CALL, MOCK_COMPLIANCE_CALL], finalContent: '最终产出' });
+});
+
+test('agentic forced approval draft when model misses approval tool', async () => {
+  await withMockModel(async () => {
+    const result = await app.executeAgentCommand({ commandId: null, userId: 1, command: '请为新品发广告草稿', agentId: 'main', sessionId: 'test-agentic-approval' });
+    assert.equal(result.path, 'agentic');
+    assert.equal(result.ok, true);
+    const run = dbmod.getAgentRun(result.runId);
+    const forced = run.steps.filter(s => s.tool === 'approval_draft');
+    assert.equal(forced.length, 1);
+    assert.equal(forced[0].meta.forced, true);
+    assert.equal(run.status, 'ok');
+    assert.match(run.result, /模拟/);
+  }, { toolCalls: [MOCK_RESEARCH_CALL], finalContent: '无审批草稿' });
+});
+
+test('agentic all-tools-failed falls back to rules pipeline', async () => {
+  await withMockModel(async () => {
+    const result = await app.executeAgentCommand({ commandId: null, userId: 1, command: '生成运营报告', agentId: 'main', sessionId: 'test-agentic-allfail' });
+    assert.equal(result.path, 'agentic_fallback');
+    assert.equal(result.ok, false);
+    assert.ok(result.runId > 0);
+  }, { toolCalls: [MOCK_RESEARCH_CALL], failPlain: true });
 });

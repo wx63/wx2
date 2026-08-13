@@ -583,11 +583,11 @@ async function loadUser() {
     document.getElementById("userAvatar").textContent = name.charAt(0).toUpperCase();
     return currentUser;
   } catch (e) {
-    if (e.message === "????" || String(e.message).includes("401")) {
+    if (e.message === "请先登录" || String(e.message).includes("401")) {
       window.location.href = "/login.html";
       return null;
     }
-    showToast("?????????" + e.message);
+    showToast("获取用户信息失败：" + e.message);
     return null;
   }
 }
@@ -856,7 +856,7 @@ async function refreshLeadsFromServer() {
     await loadDashboardData();
     renderLeads();
   } catch (e) {
-    showToast("?????" + e.message);
+    showToast("刷新线索失败：" + e.message);
     throw e;
   }
 }
@@ -885,7 +885,7 @@ function addReport(r) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ agent: r.agent, title: r.title, tag: r.tag, color: r.color, content: r.content || "" }),
-  }).catch(e => showToast("???????" + e.message));
+  }).catch(e => showToast("报告保存失败：" + e.message));
 }
 function renderReports() {
   const el = document.getElementById("reportList");
@@ -1051,7 +1051,7 @@ function renderOrders() {
 function openOrderModal(order) {
   const overlay = document.getElementById("modalOverlay");
   const o = order || {};
-  document.getElementById("modalBody").innerHTML = `<div class="task-modal-hero" style="--agent-color:#60a5fa"><span class="detail-emoji">??</span><div><div class="detail-name">${escapeHtml(order ? "编辑订单" : "新增订单")}</div><div class="detail-role">本地订单</div></div><button class="modal-close" id="modalClose">?</button></div><div class="task-modal-section"><input id="orderFormOrderNo" placeholder="订单号" value="${escapeAttr(o.orderNo || "")}" /><input id="orderFormCustomer" placeholder="客户名称" value="${escapeAttr(o.customerName || "")}" /><input id="orderFormProduct" placeholder="商品" value="${escapeAttr(o.product || "")}" /><input id="orderFormQty" type="number" min="1" placeholder="数量" value="${escapeHtml(o.qty || 1)}" /><input id="orderFormAmount" type="number" step="0.01" placeholder="金额" value="${escapeHtml(o.amount || 0)}" /><input id="orderFormChannel" placeholder="渠道" value="${escapeAttr(o.channel || "")}" /><select id="orderFormStatus">${["pending","shipped","completed","cancelled"].map(s => `<option value="${s}" ${o.status === s ? "selected" : ""}>${s}</option>`).join("")}</select><input id="orderFormTracking" placeholder="物流单号" value="${escapeAttr(o.trackingNo || "")}" /></div><div class="task-modal-foot"><button class="btn btn-primary" id="orderSave">保存</button></div>`;
+  document.getElementById("modalBody").innerHTML = `<div class="task-modal-hero" style="--agent-color:#60a5fa"><span class="detail-emoji">📦</span><div><div class="detail-name">${escapeHtml(order ? "编辑订单" : "新增订单")}</div><div class="detail-role">本地订单</div></div><button class="modal-close" id="modalClose">✕</button></div><div class="task-modal-section"><input id="orderFormOrderNo" placeholder="订单号" value="${escapeAttr(o.orderNo || "")}" /><input id="orderFormCustomer" placeholder="客户名称" value="${escapeAttr(o.customerName || "")}" /><input id="orderFormProduct" placeholder="商品" value="${escapeAttr(o.product || "")}" /><input id="orderFormQty" type="number" min="1" placeholder="数量" value="${escapeHtml(o.qty || 1)}" /><input id="orderFormAmount" type="number" step="0.01" placeholder="金额" value="${escapeHtml(o.amount || 0)}" /><input id="orderFormChannel" placeholder="渠道" value="${escapeAttr(o.channel || "")}" /><select id="orderFormStatus">${["pending","shipped","completed","cancelled"].map(s => `<option value="${s}" ${o.status === s ? "selected" : ""}>${s}</option>`).join("")}</select><input id="orderFormTracking" placeholder="物流单号" value="${escapeAttr(o.trackingNo || "")}" /></div><div class="task-modal-foot"><button class="btn btn-primary" id="orderSave">保存</button></div>`;
   overlay.classList.add("show");
   document.getElementById("modalClose").onclick = closeModal;
   document.getElementById("orderSave").onclick = async () => {
@@ -1637,7 +1637,7 @@ async function runCommand(cmd, opts = {}) {
 
     push('\u4EA7\u51FA', result.content, '\u7ED3\u679C', true);
     addReport({ agent: agentIdx, title: cmd.slice(0, 24) + (cmd.length > 24 ? '\u2026' : ''), tag, color, content: result.content });
-    try { await loadDashboardData(); renderAgentRuns(); } catch (e) { showToast("?????????" + e.message); }
+    try { await loadDashboardData(); renderAgentRuns(); } catch (e) { showToast("刷新数据失败：" + e.message); }
   } catch (e) {
     push('\u9519\u8BEF', `\u6267\u884C\u5931\u8D25\uFF1A${e.message}`, '\u9519\u8BEF', true);
     showToast(`\u6267\u884C\u5931\u8D25\uFF1A${e.message}`);
