@@ -1,6 +1,26 @@
 // ============ 登录页初始化 ============
+const authTabs = Array.from(document.querySelectorAll(".auth-tab"));
+const formPanels = Array.from(document.querySelectorAll(".form-panel"));
 const underline = document.getElementById("tabUnderline");
-if (underline) underline.style.transform = "translateX(0)";
+
+function positionUnderline() {
+  if (!underline) return;
+  const visibleTabs = authTabs.filter((tab) => tab.offsetParent !== null);
+  if (!visibleTabs.length) return;
+  const activeIndex = Math.max(0, visibleTabs.indexOf(document.querySelector(".auth-tab.active")));
+  underline.style.width = `calc(${100 / visibleTabs.length}% - 4px)`;
+  underline.style.transform = `translateX(${activeIndex * 100}%)`;
+}
+
+authTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    authTabs.forEach((t) => t.classList.toggle("active", t === tab));
+    formPanels.forEach((panel) => panel.classList.toggle("active", panel.id === `${tab.dataset.mode}Form`));
+    positionUnderline();
+  });
+});
+
+positionUnderline();
 
 // ============ 密码显示切换 ============
 document.querySelectorAll(".toggle-pwd").forEach((btn) => {
@@ -23,11 +43,21 @@ function clearError(field) {
 document.querySelectorAll(".field input").forEach((input) => {
   input.addEventListener("input", () => clearError(input.closest(".field")));
 });
+document.querySelectorAll(".field input[type=checkbox]").forEach((input) => {
+  input.addEventListener("change", () => clearError(input.closest(".field")));
+});
 
 function validateForm(form) {
   let ok = true;
   form.querySelectorAll(".field").forEach((field) => {
     const input = field.querySelector("input");
+    if (input.type === "checkbox") {
+      if (!input.checked) {
+        showError(field, "请先阅读并同意注册说明");
+        ok = false;
+      }
+      return;
+    }
     if (!input.value.trim()) {
       showError(field, "此项为必填");
       ok = false;
@@ -39,6 +69,12 @@ function validateForm(form) {
       ok = false;
     }
   });
+  const password = form.querySelector("[name=password]");
+  const confirmPassword = form.querySelector("[name=confirmPassword]");
+  if (password && confirmPassword && password.value !== confirmPassword.value) {
+    showError(confirmPassword.closest(".field"), "两次输入的密码不一致");
+    ok = false;
+  }
   return ok;
 }
 
@@ -82,7 +118,47 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
   }
 });
 
-// ============ OAuth ==========
+document.getElementById("registerForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  if (!validateForm(form)) return;
+  const btn = form.querySelector("button[type=submit]");
+  const reset = setSubmitting(btn, "创建中…");
+  try {
+    await postAuth("/api/auth/register", {
+      name: form.name.value.trim(),
+      email: form.email.value,
+      password: form.password.value,
+      confirmPassword: form.confirmPassword.value,
+    });
+    window.location.href = "/";
+  } catch (err) {
+    reset();
+    showToast(err.message || "注册失败");
+  }
+});
+
+// ============ 注册开关 ============
+(async () => {
+  try {
+    const resp = await fetch("/api/auth/register-status");
+    const data = await resp.json().catch(() => ({}));
+    const enabled = resp.ok && data.ok && data.data && data.data.enabled;
+    if (enabled) return;
+
+    const registerTab = document.querySelector("[data-mode=register]");
+    const registerForm = document.getElementById("registerForm");
+    if (registerTab) registerTab.remove();
+    if (registerForm) registerForm.remove();
+    const loginNote = document.querySelector("#loginForm .auth-note");
+    if (loginNote) {
+      loginNote.textContent = "公开注册已关闭。首次部署请在 .env 中配置 ADMIN_EMAIL / ADMIN_PASSWORD 初始化管理员账号。";
+    }
+    positionUnderline();
+  } catch {}
+})();
+
+// ============ OAuth ============
 document.querySelectorAll(".oauth-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     showToast(`${btn.dataset.provider} 登录待接入后端 OAuth`);

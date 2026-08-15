@@ -104,6 +104,117 @@ function getConsoleTargets() {
   ].filter(Boolean);
 }
 
+function looksLikeMarkdown(text) {
+  return /(?:^|\n)(?:\s*#{1,4}\s|>\s?|[-*+]\s|\d+[.)]\s|\|.*\||---+$)/m.test(text) || /(\*\*|`)/.test(text);
+}
+
+function inlineFormat(escapedText) {
+  return String(escapedText || "")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/~~([^~]+)~~/g, "<s>$1</s>");
+}
+
+function renderTable(rows) {
+  const cells = (line) => String(line || "").trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => inlineFormat(cell.trim()));
+  const delimiterIndex = rows.findIndex((row) => {
+    const cells = row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+    return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell));
+  });
+  const hasDelimiter = delimiterIndex >= 0;
+  const headerCells = cells(rows[0]);
+  const bodyRows = hasDelimiter ? rows.slice(delimiterIndex + 1) : rows.slice(1);
+  const head = `<tr>${headerCells.map((cell) => `<th>${cell}</th>`).join("")}</tr>`;
+  const body = bodyRows.filter(Boolean).map((row) => `<tr>${cells(row).map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("");
+  return `<div class="cs-table-wrap"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
+function renderRichText(text) {
+  if (!text) return "";
+  const rawLines = String(text == null ? "" : text).split(/\r?\n/);
+  const lines = rawLines.map(escapeHtml);
+  const blocks = [];
+  let i = 0;
+  let guard = 0;
+
+  while (i < lines.length) {
+    if (++guard > 5000) break;
+    const line = lines[i];
+    const trim = line.trim();
+
+    if (!trim) { i += 1; continue; }
+    if (/^(?:---+|\*\*\*+)$/.test(trim)) { blocks.push('<hr class="cs-hr">'); i += 1; continue; }
+
+    const heading = trim.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      const cls = level <= 2 ? "cs-h2" : level === 3 ? "cs-h3" : "cs-h4";
+      blocks.push(`<h4 class="${cls}">${inlineFormat(heading[2])}</h4>`);
+      i += 1;
+      continue;
+    }
+
+    if (/^>\s?/.test(rawLines[i].trim())) {
+      const quote = [];
+      while (i < lines.length && /^>\s?/.test(rawLines[i].trim())) {
+        quote.push(inlineFormat(escapeHtml(rawLines[i].trim().replace(/^>\s?/, ""))));
+        i += 1;
+      }
+      blocks.push(`<blockquote class="cs-quote">${quote.join("<br>")}</blockquote>`);
+      continue;
+    }
+
+    if (/^\s*(?:[-*+])\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*(?:[-*+])\s+/.test(lines[i])) {
+        items.push(`<li>${inlineFormat(lines[i].replace(/^\s*(?:[-*+])\s+/, ""))}</li>`);
+        i += 1;
+      }
+      blocks.push(`<ul class="cs-list">${items.join("")}</ul>`);
+      continue;
+    }
+
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+        items.push(`<li>${inlineFormat(lines[i].replace(/^\s*\d+[.)]\s+/, ""))}</li>`);
+        i += 1;
+      }
+      blocks.push(`<ol class="cs-list">${items.join("")}</ol>`);
+      continue;
+    }
+
+    if (trim.startsWith("|") && trim.endsWith("|")) {
+      const rows = [];
+      while (i < lines.length) {
+        const current = lines[i].trim();
+        if (!current.startsWith("|") || !current.endsWith("|")) break;
+        rows.push(current);
+        i += 1;
+      }
+      if (rows.length) blocks.push(renderTable(rows));
+      continue;
+    }
+
+    const paragraph = [];
+    while (i < lines.length) {
+      const current = lines[i].trim();
+      if (!current) break;
+      if (/^(?:---+|\*\*\*+)$/.test(current)) break;
+      if (/^#{1,4}\s/.test(current)) break;
+      if (/^>\s?/.test(rawLines[i].trim())) break;
+      if (/^\s*(?:[-*+])\s+/.test(lines[i])) break;
+      if (/^\s*\d+[.)]\s+/.test(lines[i])) break;
+      if (current.startsWith("|") && current.endsWith("|")) break;
+      paragraph.push(inlineFormat(current));
+      i += 1;
+    }
+    blocks.push(`<p>${paragraph.join("<br>")}</p>`);
+  }
+
+  return blocks.join("");
+}
+
 function buildConsoleHtml() {
   if (!consoleState.steps.length) {
     return `<div class="console-empty">
@@ -115,18 +226,19 @@ function buildConsoleHtml() {
 
   return consoleState.steps.map((s, i) => {
     // 长产出（报告/分析/答复）加 long 类：内部滚动，完整可读，不截断不撑页
-    const isLong = typeof s.text === "string" && s.text.length > 280;
-    // escapeHtml 防模型输出/用户输入污染页面（保留换行靠 CSS white-space: pre-wrap）
+    const isMarkdown = looksLikeMarkdown(s.text);
+    const isLong = typeof s.text === "string" && (s.text.length > 280 || isMarkdown);
+    const isOutput = s.label === "产出" || s.tag === "结果" || s.isFinal;
     const textHtml = s.text
-      ? escapeHtml(s.text)
+      ? (isMarkdown ? renderRichText(s.text) : escapeHtml(s.text))
       : '<span class="cs-typing">▌</span>';
     return `
-    <div class="console-step ${s.done ? "done" : "active"}" style="--step-color:${safeCssColor(s.color)}">
+    <div class="console-step ${s.done ? "done" : "active"}${isOutput ? " final-output" : ""}" style="--step-color:${safeCssColor(s.color)}">
       ${s.isApproval ? '<span class="console-gate">闸门</span>' : ""}
       <div class="cs-marker"></div>
       <div class="cs-body">
         <div class="cs-label"><span class="cs-tag" style="color:${safeCssColor(s.color)}">${escapeHtml(s.tag)}</span> ${escapeHtml(s.label)}</div>
-        <div class="cs-text${isLong ? " long" : ""}">${textHtml}</div>
+        <div class="cs-text${isLong ? " long" : ""}${isMarkdown ? " rich" : ""}">${textHtml}</div>
       </div>
       ${s.done ? '<span class="cs-check">✓</span>' : '<span class="cs-spinner"></span>'}
     </div>`;
@@ -144,6 +256,7 @@ function renderCommandDrawerState() {
     drawer.classList.toggle("running", consoleState.running);
   }
   if (status) {
+    status.className = consoleState.running ? "status running" : consoleState.steps.length ? "status done" : "status idle";
     status.textContent = consoleState.running
       ? "执行中"
       : consoleState.steps.length

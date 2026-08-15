@@ -899,6 +899,103 @@ button { font-family: inherit; }
   font-size: 13px;
   line-height: 1.7;
 }
+/* Agent 长产出富文本展示 */
+.console-body {
+  background: linear-gradient(180deg, rgba(15,19,30,0.72), rgba(8,10,18,0.84));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.console-step { gap: 14px; padding: 11px 4px; }
+.cs-marker {
+  width: 10px; height: 10px; margin-top: 15px;
+  background: transparent;
+  border: 2px solid var(--step-color, var(--brand));
+  box-shadow: none;
+}
+.console-step.done .cs-marker {
+  background: var(--step-color, var(--brand));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--step-color, var(--brand)) 70%, transparent);
+}
+.cs-tag {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 6px;
+  background: color-mix(in srgb, var(--step-color, var(--brand)) 14%, transparent);
+}
+.cs-text.long {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--step-color, var(--brand)) 5%, transparent), rgba(0,0,0,0.18));
+  border: 1px solid color-mix(in srgb, var(--step-color, var(--brand)) 26%, transparent);
+  border-left: 3px solid var(--step-color, var(--brand));
+  border-radius: var(--r-md);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.cs-text.rich { font-family: "Inter", system-ui, sans-serif; white-space: normal; }
+.cs-text.rich > :first-child { margin-top: 0; }
+.cs-text.rich > :last-child { margin-bottom: 0; }
+.cs-text.rich p { margin: 0 0 8px; color: var(--text-2); }
+.cs-text.rich h4 { margin: 14px 0 8px; font-weight: 700; line-height: 1.35; color: var(--text-1); }
+.cs-text.rich .cs-h2 { font-size: 15px; }
+.cs-text.rich .cs-h3 { font-size: 13.5px; }
+.cs-text.rich .cs-h4 { font-size: 12.5px; }
+.cs-list { margin: 6px 0 8px; padding-left: 20px; color: var(--text-2); }
+.cs-list li { margin: 3px 0; line-height: 1.6; }
+.cs-quote {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--warning);
+  background: rgba(251,191,36,0.07);
+  border-radius: 0 8px 8px 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.cs-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0,0,0,0.16);
+}
+.cs-table-wrap table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 12.5px; }
+.cs-table-wrap th, .cs-table-wrap td {
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: top;
+}
+.cs-table-wrap thead th {
+  font-size: 11px;
+  color: var(--text-3);
+  background: rgba(255,255,255,0.03);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cs-table-wrap tbody tr:hover { background: rgba(255,255,255,0.025); }
+.cs-table-wrap tbody tr:last-child td { border-bottom: none; }
+.cs-text.rich code {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--brand);
+  background: rgba(99,102,241,0.1);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.cs-hr { border: 0; border-top: 1px dashed var(--border-strong); margin: 10px 0; }
+.console-step.final-output {
+  margin: 6px -8px;
+  padding: 12px 12px 10px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--step-color, var(--brand)) 9%, transparent), transparent 58%);
+  border: 1px solid color-mix(in srgb, var(--step-color, var(--brand)) 28%, transparent);
+  border-radius: 14px;
+}
+.console-step.final-output .cs-text.long {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .cs-typing { animation: blink 0.9s steps(2) infinite; color: var(--brand); }
 @keyframes blink { 50% { opacity: 0; } }
 .cs-check { color: var(--success); font-size: 14px; margin-top: 2px; }
@@ -981,6 +1078,18 @@ button { font-family: inherit; }
   opacity: 0.72;
   cursor: not-allowed;
 }
+
+.command-drawer { width: min(640px, calc(100vw - 48px)); max-height: min(640px, calc(100vh - 90px)); }
+.command-drawer-body { max-height: 480px; }
+.command-drawer-title span.status {
+  display: inline-flex; align-items: center; gap: 6px;
+  width: max-content; margin-top: 2px; padding: 3px 8px;
+  border-radius: 20px; font-size: 10.5px; font-weight: 600;
+}
+.command-drawer-title span.status.done { color: var(--success); background: rgba(52,211,153,0.1); }
+.command-drawer-title span.status.running { color: var(--warning); background: rgba(251,191,36,0.1); }
+.command-drawer-title span.status.idle { color: var(--text-4); background: rgba(126,133,163,0.1); }
+
 
 /* ============================================================
    任务模板卡片
