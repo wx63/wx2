@@ -31,6 +31,14 @@ npm run start:prod
 
 日志输出到根目录 `logs/out.log` / `logs/err.log`，已安装 `pm2-logrotate`（50MB、保留 7 份）。
 
+### 测试
+
+```powershell
+cd server
+npm test
+npm run test:frontend
+```
+
 ## 架构
 
 ```
@@ -104,6 +112,13 @@ A: 只有 .md/.txt 进 RAG 索引；.pdf/.docx/.xlsx/.csv 可上传但标“未�
 
 Q: 审批中心“批准并归档”点了没真发帖？
 A: 正常。执行器尚未接入平台 API，当前只完成审批归档。接 Instagram/X/ERP 官方 API 后才会真执行。
+
+Q: 密钥疑似泄露 / 如何轮换？
+A: 在服务关闭或重启前分别轮换以下配置：
+- DeepSeek：在 DeepSeek 开放平台生成新 API Key，更新 `.env` 的 `OPENCLAW_PROVIDER_API_KEY`（或 `DEEPSEEK_API_KEY`），重启服务。
+- 飞书：在飞书开放平台重置 `App Secret`，更新 `.env` 的 `FEISHU_APP_SECRET`，重启服务。
+- 会话：生成新的强随机 `SESSION_SECRET`，更新 `.env` 后重启；重启后现有登录会话会失效。
+- 管理员：新库首次启动由 `ADMIN_PASSWORD` 初始化；已有账号如需重置，应在数据库中安全更新 `password_hash`，不要只在 `.env` 改 `ADMIN_PASSWORD`。
 
 ## 工作约定
 
