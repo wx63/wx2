@@ -502,3 +502,55 @@ test('agentic all-tools-failed falls back to rules pipeline', async () => {
     assert.ok(result.runId > 0);
   }, { toolCalls: [MOCK_RESEARCH_CALL], failPlain: true });
 });
+test('production security guard warns on insecure public registration', () => {
+  const warnings = [];
+  const message = app.checkProductionSecurity({ isProduction: true, allowPublicRegister: true, onWarn: (m) => warnings.push(m) });
+  assert.match(message, /生产环境已开启公开注册/);
+  assert.equal(warnings.length, 1);
+  assert.equal(app.checkProductionSecurity({ isProduction: true, allowPublicRegister: false, onWarn: (m) => warnings.push(m) }), null);
+  assert.equal(warnings.length, 1);
+});
+
+test('login failure lock persists in database', () => {
+  const key = 'persist:' + Date.now();
+  for (let i = 0; i < 5; i += 1) {
+    dbmod.recordLoginFailure(key, { maxFailures: 5, lockMs: 60000 });
+  }
+  assert.equal(dbmod.isLoginLocked(key), true);
+  dbmod.clearLoginFailures(key);
+  assert.equal(dbmod.isLoginLocked(key), false);
+});
+
+test('api rules endpoint exposes backend single source rules', async () => {
+  const viewer = await loginAs('viewer@example.com');
+  const resp = await viewer('/api/rules');
+  assert.equal(resp.status, 200);
+  const body = await resp.json();
+  assert.equal(body.ok, true);
+  assert.ok(body.data.routeRules.length >= 5);
+  assert.ok(body.data.actionRules.some(r => r.action === 'social_post' && Array.isArray(r.patterns) && r.patterns.length));
+});
+
+test('action detection catches paraphrased external actions', async () => {
+  const operator = await loginAs('operator@example.com');
+  const cases = [
+    ['帮我po个动态', 'social_post'],
+    ['发个ins', 'social_post'],
+    ['更新一下listing', 'listing_submit'],
+    ['采购一批', 'purchase'],
+    ['退我钱', 'refund'],
+  ];
+  for (const [command, expected] of cases) {
+    const resp = await operator('/api/actions/detect', jsonReq('POST', { command }));
+    assert.equal(resp.status, 200, command);
+    const data = (await resp.json()).data;
+    assert.equal(data.needsApproval, true, command);
+    assert.equal(data.action, expected, command);
+  }
+});
+
+test('approval persistence includes confidence and needs review', () => {
+  const ap = dbmod.createApproval({ title: '低置信审批', command: '补货', action: 'purchase', draft: '草稿', risk: '测试', createdBy: 1, confidence: 'low', needsReview: true });
+  assert.equal(ap.confidence, 'low');
+  assert.equal(ap.needsReview, true);
+});

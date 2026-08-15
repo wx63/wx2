@@ -8,7 +8,8 @@
     "start": "node index.js",
     "start:prod": "pm2 start index.js --name ecommerce-agent --cwd . --log ../logs/out.log --error ../logs/err.log --merge-logs --time",
     "dev": "node --watch index.js",
-    "test": "node --require ./test/setup-env.cjs --test --test-concurrency=1"
+    "test": "node --require ./test/setup-env.cjs --test --test-concurrency=1",
+    "test:frontend": "node --test --test-concurrency=1 test/frontend.smoke.test.js"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.73.0",
@@ -22,6 +23,7 @@
     "multer": "^2.2.0"
   },
   "devDependencies": {
+    "jsdom": "^24.1.3",
     "pm2": "^7.0.3"
   }
 }

@@ -56,6 +56,13 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
 
+  CREATE TABLE IF NOT EXISTS login_attempts (
+    key         TEXT PRIMARY KEY,
+    count       INTEGER NOT NULL DEFAULT 0,
+    until       INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS audit_logs (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        INTEGER,
@@ -111,6 +118,8 @@ db.exec(`
     execute_status  TEXT,
     execute_error   TEXT,
     run_id          INTEGER,
+    confidence      TEXT,
+    needs_review    INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(created_by) REFERENCES users(id),
     FOREIGN KEY(decided_by) REFERENCES users(id)
   );
@@ -277,6 +286,8 @@ addColumnIfMissing('commands', 'started_at', 'TEXT');
 addColumnIfMissing('commands', 'finished_at', 'TEXT');
 addColumnIfMissing('commands', 'run_id', 'INTEGER');
 addColumnIfMissing('approvals', 'run_id', 'INTEGER');
+addColumnIfMissing('approvals', 'confidence', 'TEXT');
+addColumnIfMissing('approvals', 'needs_review', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('agent_steps', 'meta_json', 'TEXT');
 addColumnIfMissing('agent_runs', 'summary', 'TEXT');
 addColumnIfMissing('agent_runs', 'context_json', 'TEXT');
@@ -388,6 +399,39 @@ function findUserById(id) {
 function updateLastLogin(userId) {
   const ts = nowIso();
   db.prepare(`UPDATE users SET last_login_at = @ts, updated_at = @ts WHERE id = @id`).run({ id: userId, ts });
+}
+
+function recordLoginFailure(key, { maxFailures = 5, lockMs = 15 * 60 * 1000 } = {}) {
+  const now = Date.now();
+  const storedKey = String(key || '');
+  const row = db.prepare('SELECT count, until FROM login_attempts WHERE key = ?').get(storedKey);
+  let count = row ? Number(row.count) : 0;
+  let until = row ? Number(row.until) : 0;
+  if (until > 0 && until <= now) {
+    count = 0;
+    until = 0;
+  }
+  count += 1;
+  if (count >= maxFailures) until = now + lockMs;
+  const updatedAt = nowIso();
+  db.prepare(`INSERT INTO login_attempts (key, count, until, updated_at)
+    VALUES (@key, @count, @until, @updatedAt)
+    ON CONFLICT(key) DO UPDATE SET count = excluded.count, until = excluded.until, updated_at = excluded.updated_at`).run({
+    key: storedKey,
+    count,
+    until,
+    updatedAt,
+  });
+  return { count, until };
+}
+
+function isLoginLocked(key) {
+  const row = db.prepare('SELECT until FROM login_attempts WHERE key = ?').get(String(key || ''));
+  return !!row && Number(row.until) > Date.now();
+}
+
+function clearLoginFailures(key) {
+  db.prepare('DELETE FROM login_attempts WHERE key = ?').run(String(key || ''));
 }
 
 function logAudit({ userId, action, entityType, entityId, ip, userAgent, metadata }) {
@@ -719,9 +763,9 @@ function makeApprovalId(rowid) {
   return 'AP-' + String(rowid).padStart(3, '0');
 }
 
-function createApproval({ title, command, action, draft, risk, createdBy, runId }) {
+function createApproval({ title, command, action, draft, risk, createdBy, runId, confidence, needsReview }) {
   const id = 'AP-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 8).toUpperCase();
-  const sql = "INSERT INTO approvals (id, title, command, action, draft, status, risk, created_by, run_id) VALUES (@id, @title, @command, @action, @draft, 'pending', @risk, @createdBy, @runId)";
+  const sql = "INSERT INTO approvals (id, title, command, action, draft, status, risk, created_by, run_id, confidence, needs_review) VALUES (@id, @title, @command, @action, @draft, 'pending', @risk, @createdBy, @runId, @confidence, @needsReview)";
   db.prepare(sql).run({
     id,
     title: String(title || '\u672a\u547d\u540d\u5ba1\u6279').slice(0, 300),
@@ -731,6 +775,8 @@ function createApproval({ title, command, action, draft, risk, createdBy, runId 
     risk: risk || null,
     createdBy: createdBy || null,
     runId: runId || null,
+    confidence: confidence || null,
+    needsReview: needsReview ? 1 : 0,
   });
   return getApproval(id);
 }
@@ -752,6 +798,8 @@ function approvalRow(row) {
     executeStatus: row.execute_status,
     executeError: row.execute_error,
     runId: row.run_id,
+    confidence: row.confidence,
+    needsReview: !!row.needs_review,
   };
 }
 
@@ -1140,6 +1188,9 @@ module.exports = {
   findUserByEmail,
   findUserById,
   updateLastLogin,
+  recordLoginFailure,
+  isLoginLocked,
+  clearLoginFailures,
   logAudit,
   logCommand,
   createCommandJob,

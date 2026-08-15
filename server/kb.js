@@ -34,8 +34,8 @@ function loadKnowledgeBase() {
     const text = fs.readFileSync(full, 'utf-8');
     splitByHeading(file, text);
   }
-  return CHUNKS;
   lastKbLoad = Date.now();
+  return CHUNKS;
 }
 
 /**

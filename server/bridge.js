@@ -120,26 +120,7 @@ function readProviderConfig() {
 }
 
 const PROVIDER = readProviderConfig();
-
-// ---------- 对外动作规则（审批闸门判定） ----------
-// 与前端 app.js 的 ACTION_RULES 保持一致：命中即需要人工审批
-const ACTION_RULES = [
-  { keywords: ['发帖', '发推', '发布', '发消息', '回复客户', '回复买家', '推广帖', '推文', '发一条', '发个', '发一个', '发新品', '发广告'], action: 'social_post', label: '社媒发帖/回复' },
-  { keywords: ['上架', '上新产品', '提交 listing', '提交listing', '上传产品', '上架产品'], action: 'listing_submit', label: '商品上架' },
-  { keywords: ['下单', '购买', '采购', '进货'], action: 'purchase', label: '采购/下单' },
-  { keywords: ['退款', '退钱', '赔偿', '补偿'], action: 'refund', label: '退款/赔偿' },
-];
-
-/** 判断一条指令是否属于"对外动作"（需要审批） */
-function detectAction(cmd) {
-  const lower = (cmd || '').toLowerCase();
-  for (const rule of ACTION_RULES) {
-    if (rule.keywords.some(k => lower.includes(k.toLowerCase()))) {
-      return rule;
-    }
-  }
-  return null;
-}
+const { detectAction } = require('./rules');
 
 const SYSTEM_PROMPT =
   '你是OpenClaw跨境运营平台的核心执行引擎（运营总监）。' +

@@ -12,7 +12,8 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { runAgent, runAgentTools, detectAction } = require('./bridge');
+const { runAgent, runAgentTools } = require('./bridge');
+const { ROUTE_RULES, detectAction, getPublicRules } = require('./rules');
 const { loadKnowledgeBase, retrieve, answer, fileStats } = require('./kb');
 const feishu = require('./feishu');
 const { lookupPrice } = require('./price-lookup');
@@ -28,6 +29,9 @@ const {
   findUserById,
   updateLastLogin,
   logAudit,
+  recordLoginFailure: recordLoginFailureDb,
+  isLoginLocked: isLoginLockedDb,
+  clearLoginFailures: clearLoginFailuresDb,
   logCommand,
   createCommandJob,
   getCommand,
@@ -83,6 +87,18 @@ if (!isProduction && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET 
   console.warn('⚠ SESSION_SECRET 未配置或仍为 replace-me；开发环境使用临时密钥，生产环境会拒绝启动。');
 }
 if (isProduction) app.set('trust proxy', 1);
+
+function checkProductionSecurity({ isProduction: productionMode, allowPublicRegister: registerAllowed, onWarn } = {}) {
+  if (!productionMode || !registerAllowed) return null;
+  const message = '⚠ 生产环境已开启公开注册，任何人可注册 viewer 账号看到运营数据；公网暴露前请设置 ALLOW_REGISTER=false。';
+  const warn = typeof onWarn === 'function' ? onWarn : console.warn;
+  warn(message);
+  try {
+    logAudit({ action: 'insecure_production', metadata: { allowRegister: true, message } });
+  } catch (_) {}
+  return message;
+}
+checkProductionSecurity({ isProduction, allowPublicRegister });
 
 function parseCorsOrigins(value) {
   return String(value || '')
@@ -223,27 +239,21 @@ const kbQueryLimiter = makeLimiter({ windowMs: 10 * 60 * 1000, max: 30 * limitSc
 
 const LOGIN_MAX_FAILURES = 5;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
-const loginFailures = new Map();
 
 function loginFailureKey(ip, email) {
   return `${ip}:${email}`;
 }
 
 function isLoginLocked(key) {
-  const entry = loginFailures.get(key);
-  return !!entry && entry.until > Date.now();
+  return isLoginLockedDb(key);
 }
 
 function recordLoginFailure(key) {
-  const now = Date.now();
-  const entry = loginFailures.get(key) || { count: 0, until: 0 };
-  if (entry.until > 0 && entry.until <= now) {
-    entry.count = 0;
-    entry.until = 0;
-  }
-  entry.count += 1;
-  if (entry.count >= LOGIN_MAX_FAILURES) entry.until = now + LOGIN_LOCK_MS;
-  loginFailures.set(key, entry);
+  return recordLoginFailureDb(key, { maxFailures: LOGIN_MAX_FAILURES, lockMs: LOGIN_LOCK_MS });
+}
+
+function clearLoginFailures(key) {
+  return clearLoginFailuresDb(key);
 }
 
 function validateEmail(email) {
@@ -290,14 +300,6 @@ bootstrapAdminFromEnv();
 
 app.use(attachUser);
 app.use(sameOriginWriteGuard);
-
-const ROUTE_RULES = [
-  { agent: 0, name: '\u5E02\u573A\u8C03\u7814 Agent', kw: ['\u7ADE\u54C1', '\u5468\u62A5', '\u8C03\u7814', '\u8D8B\u52BF', '\u9009\u54C1', 'voc', '\u8BC4\u8BBA', '\u5E02\u573A'], color: '#60a5fa' },
-  { agent: 1, name: '\u5185\u5BB9\u4E0E\u89C6\u89C9 Agent', kw: ['listing', '\u6807\u9898', 'seo', '\u811A\u672C', '\u6587\u6848', '\u591A\u8BED\u79CD', '\u672C\u5730\u5316', '\u7206\u6B3E'], color: '#a855f7' },
-  { agent: 2, name: '\u83B7\u5BA2\u4E0E\u793E\u5A92 Agent', kw: ['\u53D1\u5E16', '\u793E\u5A92', '\u6392\u671F', '\u79CD\u8349', 'reddit', 'tiktok', 'x \u8D26\u53F7', '\u77E9\u9635'], color: '#fb7185' },
-  { agent: 3, name: '\u5BA2\u670D\u4E0E\u8BA2\u5355 Agent', kw: ['\u5BA2\u6237', '\u56DE\u590D', '\u7269\u6D41', '\u67E5\u5355', '\u9000\u6362\u8D27', '\u5BA2\u670D', '\u8BE2', 'moq', '\u5C3A\u7801'], color: '#34d399' },
-  { agent: 4, name: '\u5408\u89C4\u4E0E\u98CE\u63A7 Agent', kw: ['\u5BA1\u67E5', '\u4FB5\u6743', '\u654F\u611F\u8BCD', 'fda', '\u6C34\u5370', '\u5E7F\u544A', 'roas', '\u5408\u89C4', '\u4E0A\u67B6\u524D'], color: '#fbbf24' },
-];
 
 function routeCommand(command) {
   const lower = String(command || '').toLowerCase();
@@ -793,6 +795,8 @@ async function processCommandJob(commandId, meta) {
         risk: '对外动作，需人工确认后执行',
         createdBy: meta.userId,
         runId: result.runId,
+        confidence: action.confidence,
+        needsReview: action.needsReview,
       });
       jobMeta.approvalId = approval.id;
     }
@@ -954,7 +958,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     logAudit({ userId: user.id, action: 'login_failed', entityType: 'user', entityId: String(user.id), ...requestMeta(req) });
     return res.status(401).json({ ok: false, error: '邮箱或密码错误' });
   }
-  loginFailures.delete(lockKey);
+  clearLoginFailures(lockKey);
   loginSession(req, user, err => {
     if (err) return res.status(500).json({ ok: false, error: '登录失败，请稍后重试' });
     updateLastLogin(user.id);
@@ -978,6 +982,8 @@ app.use('/api', requireAuth);
 
 app.get('/api/auth/me', (req, res) => res.json(safeUserResponse(req)));
 
+app.get('/api/rules', (req, res) => res.json({ ok: true, data: getPublicRules() }));
+
 app.get('/api/dashboard', (req, res) => {
   res.json({ ok: true, data: getDashboard(req.user.id, req.user.role) });
 });
@@ -986,7 +992,17 @@ app.post('/api/actions/detect', (req, res) => {
   const command = req.body && req.body.command;
   if (!command || typeof command !== 'string' || command.length > 4000) return res.status(400).json({ ok: false, error: '缺少 command 字段或指令过长' });
   const action = detectAction(command);
-  res.json({ ok: true, data: { needsApproval: !!action, action: action ? action.action : null, label: action ? action.label : null } });
+  res.json({
+    ok: true,
+    data: {
+      needsApproval: !!action,
+      action: action ? action.action : null,
+      label: action ? action.label : null,
+      confidence: action ? action.confidence : null,
+      needsReview: action ? !!action.needsReview : false,
+      matched: action ? action.matched : null,
+    },
+  });
 });
 
 app.get('/api/agents', (req, res) => res.json({ ok: true, data: listAgents() }));
@@ -1485,3 +1501,4 @@ if (require.main === module) {
 
 module.exports = app;
 module.exports.executeAgentCommand = executeAgentCommand;
+module.exports.checkProductionSecurity = checkProductionSecurity;
