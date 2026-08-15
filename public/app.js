@@ -215,6 +215,38 @@ function renderRichText(text) {
   return blocks.join("");
 }
 
+function buildConsoleStepsHtml() {
+  return consoleState.steps.map((s, i) => {
+    const isOutput = s.label === "\u4EA7\u51FA" || s.tag === "\u7ED3\u679C" || s.isFinal;
+    const preview = isOutput
+      ? (s.done ? "\u5DF2\u5B8C\u6210" : "\u6D41\u5F0F\u751F\u6210\u4E2D\u2026")
+      : String(s.text || "").split(/\r?\n/)[0] || (s.done ? "\u5DF2\u5B8C\u6210" : "\u6267\u884C\u4E2D\u2026");
+    return `
+      <div class="console-step ${s.done ? "done" : "active"}${isOutput ? " step-output" : ""}" style="--step-color:${safeCssColor(s.color)}">
+        ${s.isApproval ? '<span class="console-gate">闸门</span>' : ""}
+        <div class="cs-marker"></div>
+        <div class="cs-body">
+          <div class="cs-label"><span class="cs-tag" style="color:${safeCssColor(s.color)}">${escapeHtml(s.tag)}</span> ${escapeHtml(s.label)}</div>
+          <div class="cs-text cs-step-preview">${escapeHtml(preview)}</div>
+        </div>
+        ${s.done ? '<span class="cs-check">✓</span>' : '<span class="cs-spinner"></span>'}
+      </div>`;
+  }).join("");
+}
+
+function buildConsoleOutputHtml() {
+  const output = [...consoleState.steps].reverse().find(s => s.label === "\u4EA7\u51FA" || s.tag === "\u7ED3\u679C" || s.isFinal);
+  if (!output || !String(output.text || "").trim()) {
+    return `<div class="console-output-empty">
+      <span class="console-output-cursor">▌</span>
+      <p>${consoleState.running ? "正在流式生成最终产出\u2026" : "暂无产出，执行完成后会显示在这里"}</p>
+    </div>`;
+  }
+  const isMarkdown = looksLikeMarkdown(output.text);
+  const content = isMarkdown ? renderRichText(output.text) : escapeHtml(output.text);
+  return `<div class="console-output-content cs-text${isMarkdown ? " rich" : ""}">${content}</div>`;
+}
+
 function buildConsoleHtml() {
   if (!consoleState.steps.length) {
     return `<div class="console-empty">
@@ -224,27 +256,39 @@ function buildConsoleHtml() {
     </div>`;
   }
 
-  return consoleState.steps.map((s, i) => {
-    // 长产出（报告/分析/答复）加 long 类：内部滚动，完整可读，不截断不撑页
-    const isMarkdown = looksLikeMarkdown(s.text);
-    const isLong = typeof s.text === "string" && (s.text.length > 280 || isMarkdown);
-    const isOutput = s.label === "产出" || s.tag === "结果" || s.isFinal;
-    const textHtml = s.text
-      ? (isMarkdown ? renderRichText(s.text) : escapeHtml(s.text))
-      : '<span class="cs-typing">▌</span>';
-    return `
-    <div class="console-step ${s.done ? "done" : "active"}${isOutput ? " final-output" : ""}" style="--step-color:${safeCssColor(s.color)}">
-      ${s.isApproval ? '<span class="console-gate">闸门</span>' : ""}
-      <div class="cs-marker"></div>
-      <div class="cs-body">
-        <div class="cs-label"><span class="cs-tag" style="color:${safeCssColor(s.color)}">${escapeHtml(s.tag)}</span> ${escapeHtml(s.label)}</div>
-        <div class="cs-text${isLong ? " long" : ""}${isMarkdown ? " rich" : ""}">${textHtml}</div>
-      </div>
-      ${s.done ? '<span class="cs-check">✓</span>' : '<span class="cs-spinner"></span>'}
+  const output = [...consoleState.steps].reverse().find(s => s.label === "\u4EA7\u51FA" || s.tag === "\u7ED3\u679C" || s.isFinal);
+  const outputState = output
+    ? (output.done ? "\u5DF2\u5B8C\u6210" : "\u6D41\u5F0F\u751F\u6210\u4E2D")
+    : (consoleState.running ? "\u7B49\u5F85\u9996\u6BB5\u8F93\u51FA" : "\u6682\u65E0\u4EA7\u51FA");
+
+  return `
+    <div class="console-layout">
+      <aside class="console-steps-pane">
+        <div class="console-pane-title"><span>执行轨迹</span><em>${consoleState.steps.length} 步</em></div>
+        <div class="console-steps-list">${buildConsoleStepsHtml()}</div>
+      </aside>
+      <section class="console-output-pane">
+        <div class="console-pane-title"><span>最终产出</span><em class="${outputState === "\u5DF2\u5B8C\u6210" ? "done" : outputState.includes("流式") ? "streaming" : "idle"}">${escapeHtml(outputState)}</em></div>
+        <div class="console-output-body">${buildConsoleOutputHtml()}</div>
+      </section>
     </div>`;
-  }).join("");
 }
 
+function getConsoleOutputTargets() {
+  return [
+    document.querySelector("#consoleBody .console-output-body"),
+    document.querySelector("#commandDrawerBody .console-output-body"),
+  ].filter(Boolean);
+}
+
+function renderConsoleOutput() {
+  const html = buildConsoleOutputHtml();
+  getConsoleOutputTargets().forEach((body) => {
+    body.innerHTML = html;
+    const scrollPane = body.closest(".console-output-pane");
+    if (scrollPane) scrollPane.scrollTop = scrollPane.scrollHeight;
+  });
+}
 function renderCommandDrawerState() {
   const drawer = document.getElementById("commandDrawer");
   const status = document.getElementById("commandDrawerStatus");
@@ -285,7 +329,8 @@ function renderConsole() {
   const html = buildConsoleHtml();
   getConsoleTargets().forEach((box) => {
     box.innerHTML = html;
-    box.scrollTop = box.scrollHeight;
+    const pane = box.querySelector(".console-output-pane");
+    if (pane) pane.scrollTop = pane.scrollHeight;
   });
   renderCommandDrawerState();
 }
@@ -1800,10 +1845,11 @@ async function runCommand(cmd, opts = {}) {
       const finalStep = consoleState.steps[consoleState.steps.length - 1];
       if (finalStep && finalStep.label === '\u4EA7\u51FA') {
         finalStep.text = (finalStep.text || '') + delta;
+        renderConsoleOutput();
       } else {
         consoleState.steps.push({ label: '\u4EA7\u51FA', text: delta, tag: '\u7ED3\u679C', color, done: false });
+        renderConsole();
       }
-      renderConsole();
     });
 
     if (!consoleState.steps.some(s => s.kind === 'tool' || s.tool)) {

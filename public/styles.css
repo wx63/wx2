@@ -1295,3 +1295,111 @@ button { font-family: inherit; }
   .task-modal-foot .btn { width: 100%; justify-content: center; }
   .lead-toolbar { justify-content: space-between; }
 }
+
+/* ============================================================
+   指令控制台：执行轨迹 + 最终产出分栏
+   ============================================================ */
+.console-body { max-height: none; }
+.console-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 270px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.console-steps-pane,
+.console-output-pane { min-width: 0; }
+.console-steps-pane {
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.console-output-pane {
+  max-height: min(52vh, 520px);
+  overflow-y: auto;
+  background: rgba(0,0,0,0.16);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+}
+.console-pane-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.console-pane-title em {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-4);
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.04);
+}
+.console-pane-title em.done { color: var(--success); background: rgba(52,211,153,0.1); }
+.console-pane-title em.streaming { color: var(--warning); background: rgba(251,191,36,0.1); }
+.console-pane-title em.idle { color: var(--text-4); background: rgba(126,133,163,0.1); }
+.console-steps-list { display: flex; flex-direction: column; gap: 2px; }
+.console-step {
+  border-radius: 9px;
+  padding: 7px 6px;
+}
+.console-step:hover { background: rgba(255,255,255,0.035); }
+.console-step.step-output {
+  background: color-mix(in srgb, var(--step-color, var(--brand)) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--step-color, var(--brand)) 24%, transparent);
+}
+.cs-step-preview {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.console-output-body { min-height: 220px; }
+.console-output-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 220px;
+  color: var(--text-3);
+  text-align: center;
+}
+.console-output-cursor {
+  color: var(--brand);
+  font-size: 20px;
+  line-height: 1;
+  animation: blink 0.9s steps(2) infinite;
+}
+.console-output-content.cs-text {
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 4px 2px 12px;
+}
+.console-output-content.cs-text.rich { white-space: normal; }
+
+@media (max-width: 900px) {
+  .console-layout { grid-template-columns: 1fr; }
+  .console-steps-pane {
+    max-height: 220px;
+    border-bottom: 1px solid var(--border);
+  }
+  .console-output-pane { max-height: 60vh; }
+}
+@media (max-width: 760px) {
+  .console-body { max-height: none !important; }
+  .console-output-pane { max-height: 58vh; }
+}
