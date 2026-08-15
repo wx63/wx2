@@ -1402,4 +1402,64 @@ button { font-family: inherit; }
 @media (max-width: 760px) {
   .console-body { max-height: none !important; }
   .console-output-pane { max-height: 58vh; }
-}
+}
+
+/* ============================================================
+   订单管理按钮与状态
+   ============================================================ */
+.order-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.order-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-2);
+  border-radius: 7px;
+  background: var(--glass-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+}
+.order-action-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+.order-action-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-1);
+  background: var(--glass-3);
+  transform: translateY(-1px);
+}
+.order-action-btn:active { transform: translateY(0); }
+.order-action-btn.danger { color: var(--danger); border-color: rgba(251,113,133,0.26); }
+.order-action-btn.danger:hover {
+  color: var(--danger);
+  background: rgba(251,113,133,0.1);
+  border-color: rgba(251,113,133,0.5);
+}
+.order-status {
+  display: inline-flex;
+  align-items: center;
+  min-width: 54px;
+  justify-content: center;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--status-color, var(--text-3));
+  background: color-mix(in srgb, var(--status-color, var(--text-3)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-color, var(--text-3)) 24%, transparent);
+  white-space: nowrap;
+}
+.status-pending { --status-color: #fbbf24; }
+.status-paid { --status-color: #60a5fa; }
+.status-shipped { --status-color: #34d399; }
+.status-delivered { --status-color: #22d3ee; }
+.status-completed { --status-color: #34d399; }
+.status-cancelled { --status-color: #fb7185; }
+#addOrderBtn svg { width: 14px; height: 14px; }

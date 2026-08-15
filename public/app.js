@@ -1178,6 +1178,15 @@ function openAgentRunDetail(run) {
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); }, { once: true });
 }
 
+const ORDER_STATUS_LABEL = {
+  pending: '待处理',
+  paid: '已付款',
+  shipped: '已发货',
+  delivered: '已送达',
+  completed: '已完成',
+  cancelled: '已取消',
+};
+
 let ORDERS = { items: [], total: 0 };
 let ORDER_FILTER = { status: "all", search: "", offset: 0, limit: 50 };
 async function loadOrdersFromServer() {
@@ -1201,7 +1210,8 @@ function renderOrders() {
   }).catch(() => {});
   const items = ORDERS.items || [];
   tableEl.innerHTML = items.length ? `<table class="lead-table"><thead><tr><th>订单号</th><th>客户</th><th>商品</th><th>数量</th><th>金额</th><th>渠道</th><th>状态</th><th>物流</th><th></th></tr></thead><tbody>` + items.map(o => {
-    return `<tr><td>${escapeHtml(o.orderNo)}</td><td>${escapeHtml(o.customerName || "")}</td><td>${escapeHtml(o.product || "")}</td><td>${escapeHtml(o.qty)}</td><td>${escapeHtml(o.currency || "USD")} ${escapeHtml(o.amount)}</td><td>${escapeHtml(o.channel || "")}</td><td>${escapeHtml(o.status || "pending")}</td><td>${escapeHtml(o.trackingNo || "")}</td><td><button class="btn btn-sm" data-order-edit="${escapeAttr(o.id)}">编辑</button> <button class="btn btn-sm" data-order-delete="${escapeAttr(o.id)}">删除</button></td></tr>`;
+    const orderStatus = o.status || "pending";
+    return `<tr><td>${escapeHtml(o.orderNo)}</td><td>${escapeHtml(o.customerName || "")}</td><td>${escapeHtml(o.product || "")}</td><td>${escapeHtml(o.qty)}</td><td>${escapeHtml(o.currency || "USD")} ${escapeHtml(o.amount)}</td><td>${escapeHtml(o.channel || "")}</td><td><span class="order-status status-${escapeAttr(orderStatus)}">${escapeHtml(ORDER_STATUS_LABEL[orderStatus] || orderStatus)}</span></td><td>${escapeHtml(o.trackingNo || "")}</td><td><div class="order-actions"><button class="order-action-btn" data-order-edit="${escapeAttr(o.id)}" title="编辑订单" aria-label="编辑订单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg><span>编辑</span></button><button class="order-action-btn danger" data-order-delete="${escapeAttr(o.id)}" title="删除订单" aria-label="删除订单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg><span>删除</span></button></div></td></tr>`;
   }).join("") + "</tbody></table>" : `<div class="ap-empty">暂无订单</div>`;
   tableEl.querySelectorAll("[data-order-edit]").forEach(b => b.onclick = () => openOrderModal(items.find(o => o.id === b.dataset.orderEdit)));
   tableEl.querySelectorAll("[data-order-delete]").forEach(b => b.onclick = async () => { if (!confirm("确认删除该订单？")) return; try { await apiJson("/api/orders/" + b.dataset.orderDelete, { method: "DELETE" }); showToast("订单已删除"); await loadOrdersFromServer(); } catch (e) { showToast("删除失败：" + e.message); } });
@@ -1209,9 +1219,11 @@ function renderOrders() {
 function openOrderModal(order) {
   const overlay = document.getElementById("modalOverlay");
   const o = order || {};
-  document.getElementById("modalBody").innerHTML = `<div class="task-modal-hero" style="--agent-color:#60a5fa"><span class="detail-emoji">📦</span><div><div class="detail-name">${escapeHtml(order ? "编辑订单" : "新增订单")}</div><div class="detail-role">本地订单</div></div><button class="modal-close" id="modalClose">✕</button></div><div class="task-modal-section"><input id="orderFormOrderNo" placeholder="订单号" value="${escapeAttr(o.orderNo || "")}" /><input id="orderFormCustomer" placeholder="客户名称" value="${escapeAttr(o.customerName || "")}" /><input id="orderFormProduct" placeholder="商品" value="${escapeAttr(o.product || "")}" /><input id="orderFormQty" type="number" min="1" placeholder="数量" value="${escapeHtml(o.qty || 1)}" /><input id="orderFormAmount" type="number" step="0.01" placeholder="金额" value="${escapeHtml(o.amount || 0)}" /><input id="orderFormChannel" placeholder="渠道" value="${escapeAttr(o.channel || "")}" /><select id="orderFormStatus">${["pending","shipped","completed","cancelled"].map(s => `<option value="${s}" ${o.status === s ? "selected" : ""}>${s}</option>`).join("")}</select><input id="orderFormTracking" placeholder="物流单号" value="${escapeAttr(o.trackingNo || "")}" /></div><div class="task-modal-foot"><button class="btn btn-primary" id="orderSave">保存</button></div>`;
+  document.getElementById("modalBody").innerHTML = `<div class="task-modal-hero" style="--agent-color:#60a5fa"><span class="detail-emoji">📦</span><div><div class="detail-name">${escapeHtml(order ? "编辑订单" : "新增订单")}</div><div class="detail-role">本地订单</div></div><button class="modal-close" id="modalClose">✕</button></div><div class="task-modal-section"><input id="orderFormOrderNo" placeholder="订单号" value="${escapeAttr(o.orderNo || "")}" /><input id="orderFormCustomer" placeholder="客户名称" value="${escapeAttr(o.customerName || "")}" /><input id="orderFormProduct" placeholder="商品" value="${escapeAttr(o.product || "")}" /><input id="orderFormQty" type="number" min="1" placeholder="数量" value="${escapeHtml(o.qty || 1)}" /><input id="orderFormAmount" type="number" step="0.01" placeholder="金额" value="${escapeHtml(o.amount || 0)}" /><input id="orderFormChannel" placeholder="渠道" value="${escapeAttr(o.channel || "")}" /><select id="orderFormStatus">${["pending","shipped","completed","cancelled"].map(s => `<option value="${s}" ${o.status === s ? "selected" : ""}>${s}</option>`).join("")}</select><input id="orderFormTracking" placeholder="物流单号" value="${escapeAttr(o.trackingNo || "")}" /></div><div class="task-modal-foot"><button class="btn" id="orderCancel">取消</button><button class="btn btn-primary" id="orderSave">保存</button></div>`;
   overlay.classList.add("show");
   document.getElementById("modalClose").onclick = closeModal;
+  const cancelBtn = document.getElementById("orderCancel");
+  if (cancelBtn) cancelBtn.onclick = closeModal;
   document.getElementById("orderSave").onclick = async () => {
     const payload = { orderNo: document.getElementById("orderFormOrderNo").value.trim(), customerName: document.getElementById("orderFormCustomer").value.trim(), product: document.getElementById("orderFormProduct").value.trim(), qty: Number(document.getElementById("orderFormQty").value), amount: Number(document.getElementById("orderFormAmount").value), channel: document.getElementById("orderFormChannel").value.trim(), status: document.getElementById("orderFormStatus").value, trackingNo: document.getElementById("orderFormTracking").value.trim() };
     if (!payload.orderNo) { showToast("订单号不能为空"); return; }
