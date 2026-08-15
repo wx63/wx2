@@ -1612,13 +1612,79 @@ async function loadDashboardData() {
   feedItems.push(...(d.activity || []));
 }
 
-/** 调后端提交异步指令并轮询结果，返回兼容旧调用的 {content, approval, needsApproval} */
-async function callBackend(command, onStatus) {
-  const submitted = await apiJson("/api/command", {
+async function readCommandStream(resp, onDelta, onStatus) {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    let currentEvent = "";
+    let commandId = null;
+    let content = "";
+    let approval = null;
+    let needsApproval = false;
+
+    const handleEvent = (event, payload) => {
+      if (event === "accepted") {
+        commandId = payload.commandId;
+        if (typeof onStatus === "function") onStatus({ status: "queued", commandId });
+      } else if (event === "delta") {
+        const delta = payload.content || "";
+        content += delta;
+        if (typeof onDelta === "function") onDelta(delta);
+      } else if (event === "complete") {
+        if (payload.status === "error") {
+          reject(new Error(payload.error || "执行失败"));
+          return;
+        }
+        content = payload.content || content;
+        approval = payload.approval || null;
+        needsApproval = !!payload.approvalId || !!payload.needsApproval;
+      } else if (event === "done") {
+        resolve({ content, approval, needsApproval });
+      }
+    };
+
+    const decoder = new TextDecoder("utf-8");
+    const reader = resp.body.getReader();
+    const pump = async () => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline;
+        while ((newline = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, newline).replace(/\r$/, "");
+          buffer = buffer.slice(newline + 1);
+          if (line.startsWith("event:")) {
+            currentEvent = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            const data = line.slice(5).trim();
+            if (!data) continue;
+            try { handleEvent(currentEvent, JSON.parse(data)); }
+            catch (_) {}
+          }
+        }
+      }
+      if (content) resolve({ content, approval, needsApproval });
+      else reject(new Error("指令流连接已中断"));
+    };
+    pump().catch(reject);
+  });
+}
+
+/** 调后端提交异步指令并解析流式结果，返回兼容旧调用的 {content, approval, needsApproval} */
+async function callBackend(command, onStatus, onDelta) {
+  const resp = await fetch(`${API_BASE}/api/command`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ command, agentId: "main", sessionId: "ecommerce-console" }),
+    body: JSON.stringify({ command, agentId: "main", sessionId: "ecommerce-console", stream: true }),
   });
+  const contentType = String(resp.headers.get("content-type") || "");
+  if (resp.ok && contentType.includes("text/event-stream")) {
+    return readCommandStream(resp, onDelta, onStatus);
+  }
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) throw new Error(data.error || `HTTP ${resp.status}`);
+  const submitted = data;
   const commandId = submitted.commandId;
   if (!commandId) throw new Error("后端未返回 commandId");
 
@@ -1730,6 +1796,14 @@ async function runCommand(cmd, opts = {}) {
         consoleState.steps = base;
         renderConsole();
       }
+    }, (delta) => {
+      const finalStep = consoleState.steps[consoleState.steps.length - 1];
+      if (finalStep && finalStep.label === '\u4EA7\u51FA') {
+        finalStep.text = (finalStep.text || '') + delta;
+      } else {
+        consoleState.steps.push({ label: '\u4EA7\u51FA', text: delta, tag: '\u7ED3\u679C', color, done: false });
+      }
+      renderConsole();
     });
 
     if (!consoleState.steps.some(s => s.kind === 'tool' || s.tool)) {
@@ -1748,7 +1822,14 @@ async function runCommand(cmd, opts = {}) {
       showToast(`\u68C0\u6D4B\u5230\u5BF9\u5916\u52A8\u4F5C\uFF0C\u5DF2\u751F\u6210\u5BA1\u6279\u6761\u76EE ${result.approval.id}`);
     }
 
-    push('\u4EA7\u51FA', result.content, '\u7ED3\u679C', true);
+    const existingOutput = consoleState.steps.find(s => s.label === '\u4EA7\u51FA');
+    if (existingOutput) {
+      existingOutput.done = true;
+      existingOutput.text = result.content;
+      renderConsole();
+    } else {
+      push('\u4EA7\u51FA', result.content, '\u7ED3\u679C', true);
+    }
     addReport({ agent: agentIdx, title: cmd.slice(0, 24) + (cmd.length > 24 ? '\u2026' : ''), tag, color, content: result.content });
     try { await loadDashboardData(); renderAgentRuns(); } catch (e) { showToast("刷新数据失败：" + e.message); }
   } catch (e) {

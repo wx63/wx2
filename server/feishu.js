@@ -6,6 +6,8 @@ const lark = require('@larksuiteoapi/node-sdk');
 
 const APP_ID = process.env.FEISHU_APP_ID || '';
 const APP_SECRET = process.env.FEISHU_APP_SECRET || '';
+const ALLOWED_CHAT_IDS = String(process.env.FEISHU_ALLOWED_CHAT_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+const ALLOWED_SENDER_IDS = String(process.env.FEISHU_ALLOWED_SENDER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 let client = null;
 let wsClient = null;
@@ -93,8 +95,13 @@ async function startFeishuLongConnection({ onMessage } = {}) {
       const messageId = message.message_id || '';
       const chatId = message.chat_id || '';
       const text = parseTextContent(message.content);
+      const senderId = (sender.sender_id && (sender.sender_id.open_id || sender.sender_id.user_id)) || '';
 
       if (!messageId || !chatId || !text) return {};
+      if (message.message_type && message.message_type !== 'text') return {};
+      if (sender.sender_type && sender.sender_type !== 'user') return {};
+      if (ALLOWED_CHAT_IDS.length && !ALLOWED_CHAT_IDS.includes(chatId)) return {};
+      if (ALLOWED_SENDER_IDS.length && !ALLOWED_SENDER_IDS.includes(senderId)) return {};
       if (handledMessageIds.has(messageId)) return {};
       handledMessageIds.add(messageId);
       if (handledMessageIds.size > 500) {
@@ -102,7 +109,7 @@ async function startFeishuLongConnection({ onMessage } = {}) {
         handledMessageIds.delete(first);
       }
 
-      logMessage({ type: 'received', messageId, chatId, senderId: sender.sender_id && sender.sender_id.open_id, text: String(text).slice(0, 200) });
+      logMessage({ type: 'received', messageId, chatId, senderId, text: String(text).slice(0, 200) });
       if (typeof onMessage === 'function') {
         setImmediate(() => {
           onMessage({ messageId, chatId, sender, text }).catch((err) => {

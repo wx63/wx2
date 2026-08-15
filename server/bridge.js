@@ -26,6 +26,53 @@ const DIRECT_MODEL = process.env.OPENCLAW_DIRECT_MODEL || 'deepseek/deepseek-cha
 const DIRECT_TIMEOUT_MS = +process.env.OPENCLAW_DIRECT_TIMEOUT_MS || 30000;
 const GATEWAY_TIMEOUT_MS = +process.env.OPENCLAW_GATEWAY_TIMEOUT_MS || 60000;
 
+async function readResponsePayload(resp, { onChunk } = {}) {
+  const contentType = String(resp.headers.get('content-type') || '');
+  if (!contentType.includes('text/event-stream') || !resp.body) {
+    const rawText = await resp.text();
+    return { sse: false, raw: rawText ? JSON.parse(rawText) : null };
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let raw = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newline).replace(/\r$/, '');
+      buffer = buffer.slice(newline + 1);
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        const obj = JSON.parse(payload);
+        if (obj.error) raw = obj;
+        if (typeof onChunk === 'function') onChunk(obj);
+      } catch (_) {}
+    }
+  }
+  return { sse: true, raw };
+}
+
+function mergeToolCalls(acc, incoming) {
+  for (const call of incoming || []) {
+    const index = Number.isFinite(call.index) ? call.index : acc.length;
+    const current = acc[index] || { id: '', type: 'function', function: { name: '', arguments: '' } };
+    current.id += call.id || '';
+    current.type = call.type || current.type;
+    if (call.function) {
+      current.function.name += call.function.name || '';
+      current.function.arguments += call.function.arguments || '';
+    }
+    acc[index] = current;
+  }
+  return acc;
+}
+
 function readGatewayToken() {
   try {
     const cfgPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
@@ -252,7 +299,7 @@ async function runAgentTools(prompt, tools, opts = {}) {
   async function callOnce(currentMessages) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutPerRound);
-    const body = { model: modelId, messages: currentMessages, tools, tool_choice: 'auto', max_tokens: maxTokens, stream: false };
+    const body = { model: modelId, messages: currentMessages, tools, tool_choice: 'auto', max_tokens: maxTokens, stream: true, stream_options: { include_usage: true } };
     try {
       const resp = await fetch(`${PROVIDER.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -260,8 +307,40 @@ async function runAgentTools(prompt, tools, opts = {}) {
         body: Buffer.from(JSON.stringify(body), 'utf8'),
         signal: ctrl.signal,
       });
-      const raw = await resp.json();
-      if (!resp.ok) return { ok: false, error: raw.error?.message || `HTTP ${resp.status}`, _fallbackable: resp.status >= 500 || resp.status === 429 };
+      const contentType = String(resp.headers.get('content-type') || '');
+      let raw;
+      let streamContent = '';
+      let streamToolCalls = [];
+      let streamUsage = null;
+
+      if (contentType.includes('text/event-stream')) {
+        const parsed = await readResponsePayload(resp, {
+          onChunk: (obj) => {
+            const delta = obj.choices?.[0]?.delta || {};
+            if (delta.content) {
+              streamContent += delta.content;
+              if (typeof opts.onDelta === 'function') opts.onDelta(delta.content);
+            }
+            if (Array.isArray(delta.tool_calls)) mergeToolCalls(streamToolCalls, delta.tool_calls);
+            if (obj.error) raw = obj;
+            if (obj.usage) streamUsage = obj.usage;
+          },
+        });
+        if (raw) return { ok: false, error: raw.error?.message || raw.error || `HTTP ${resp.status}`, _fallbackable: resp.status >= 500 || resp.status === 429 };
+        if (!streamContent && !streamToolCalls.length) {
+          return { ok: false, error: '模型流式响应为空', _fallbackable: true };
+        }
+        raw = {
+          choices: [{ message: { role: 'assistant', content: streamContent, tool_calls: streamToolCalls.length ? streamToolCalls : undefined } }],
+          usage: streamUsage || undefined,
+        };
+      } else {
+        const rawText = await resp.text();
+        try { raw = JSON.parse(rawText); } catch (_) {
+          return { ok: false, error: '模型返回了无法解析的响应', _fallbackable: true };
+        }
+        if (!resp.ok) return { ok: false, error: raw.error?.message || `HTTP ${resp.status}`, _fallbackable: resp.status >= 500 || resp.status === 429 };
+      }
       return { ok: true, raw };
     } catch (e) {
       const aborted = e.name === 'AbortError' || e.code === 'UND_ERR_HEADERS_TIMEOUT';
@@ -288,7 +367,7 @@ async function runAgentTools(prompt, tools, opts = {}) {
     const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
     if (!toolCalls.length) {
       const content = message.content || '';
-      return { ok: true, content, steps, raw: once.raw, model: DIRECT_MODEL, path: 'agentic' };
+      return { ok: true, content, steps, raw: once.raw, usage: once.raw?.usage || {}, model: DIRECT_MODEL, path: 'agentic' };
     }
     messages.push({ role: 'assistant', content: message.content || '', tool_calls: toolCalls });
     for (const call of toolCalls) {

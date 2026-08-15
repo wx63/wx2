@@ -140,6 +140,17 @@ test('public registration rejects duplicate email and mismatched passwords', asy
   assert.equal(mismatch.status, 400);
 });
 
+test('login failure lock returns 429 after repeated failures', async () => {
+  const f = cookieFetch(ctx.base);
+  const body = { email: 'locked@example.com', password: 'wrongpass' };
+  for (let i = 0; i < 5; i++) {
+    const resp = await f('/api/auth/login', jsonReq('POST', body));
+    assert.equal(resp.status, 401);
+  }
+  const locked = await f('/api/auth/login', jsonReq('POST', body));
+  assert.equal(locked.status, 429);
+});
+
 test('permissions for anonymous, viewer, operator, admin', async () => {
   assert.equal((await fetch(ctx.base + '/api/dashboard')).status, 401);
 
@@ -349,6 +360,13 @@ test('malformed JSON returns 400 and oversized JSON returns 413', async () => {
     body: JSON.stringify({ title: 'x', content: 'a'.repeat(2 * 1024 * 1024 + 1) }),
   });
   assert.equal(oversized.status, 413);
+});
+
+test('invalid write payloads return 400 instead of 500', async () => {
+  const admin = await loginAs('admin@example.com');
+  assert.equal((await admin('/api/reports', jsonReq('POST', { title: 123 }))).status, 400);
+  assert.equal((await admin('/api/orders', jsonReq('POST', { orderNo: { bad: true } }))).status, 400);
+  assert.equal((await admin('/api/integrations/feishu/send', jsonReq('POST', { chatId: 'c', text: 123 }))).status, 400);
 });
 
 test('order id sequence does not reuse deleted order ids', async () => {

@@ -87,6 +87,8 @@ db.exec(`
     approval_id  TEXT,
     prompt_tokens   INTEGER,
     completion_tokens INTEGER,
+    prompt_cache_hit_tokens INTEGER,
+    prompt_cache_miss_tokens INTEGER,
     created_at   TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
@@ -279,6 +281,8 @@ addColumnIfMissing('agent_steps', 'meta_json', 'TEXT');
 addColumnIfMissing('agent_runs', 'summary', 'TEXT');
 addColumnIfMissing('agent_runs', 'context_json', 'TEXT');
 addColumnIfMissing('agent_runs', 'stats_json', 'TEXT');
+addColumnIfMissing('commands', 'prompt_cache_hit_tokens', 'INTEGER');
+addColumnIfMissing('commands', 'prompt_cache_miss_tokens', 'INTEGER');
 
 const DEFAULT_AGENTS = [
   { id: 0, emoji: '🔍', name: '市场调研 Agent', role: 'VOC 分析 · 竞品抓取 · 趋势预测', color: '#60a5fa', status: 'online', task: '正在交叉检索亚马逊 US / Shopee 东南亚 3 个品类的竞品数据', metrics: { 报告: 4, 数据源: 12 }, skills: [{ name: 'VOC 用户声音分析', on: true }, { name: '跨平台竞品数据抓取', on: true }, { name: 'POD 选品可行性报告', on: true }, { name: '趋势预测', on: false }], templates: [{ title: '竞品周报', prompt: '汇总本周亚马逊 US 宠物用品 Top20 竞品的价格、销量、差评关键词，输出竞品周报', icon: '📊' }, { title: 'VOC 分析', prompt: '抓取本品近 30 天的买家评论，分类正向/负向诉求并提炼 5 条产品改进建议', icon: '🗣️' }, { title: 'POD 选品报告', prompt: '调研定制宠物铭牌品类的需求量、竞争度与 POD 供应链可行性，出选品报告', icon: '🏷️' }, { title: '趋势预测', prompt: '预测未来 90 天东南亚市场家居收纳品类的搜索趋势与爆款候选', icon: '📈' }] },
@@ -419,6 +423,8 @@ function commandRow(row) {
     runId: row.run_id,
     promptTokens: row.prompt_tokens,
     completionTokens: row.completion_tokens,
+    promptCacheHitTokens: row.prompt_cache_hit_tokens,
+    promptCacheMissTokens: row.prompt_cache_miss_tokens,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at,
@@ -428,8 +434,8 @@ function commandRow(row) {
 
 function logCommand(r) {
   const stmt = db.prepare(`
-    INSERT INTO commands (user_id, command, agent_id, session_id, model, path, duration_ms, status, content, content_len, error, needs_approval, approval_id, prompt_tokens, completion_tokens, updated_at, started_at, finished_at)
-    VALUES (@userId, @command, @agentId, @sessionId, @model, @path, @durationMs, @status, @content, @contentLen, @error, @needsApproval, @approvalId, @promptTokens, @completionTokens, @updatedAt, @startedAt, @finishedAt)
+    INSERT INTO commands (user_id, command, agent_id, session_id, model, path, duration_ms, status, content, content_len, error, needs_approval, approval_id, prompt_tokens, completion_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, updated_at, started_at, finished_at)
+    VALUES (@userId, @command, @agentId, @sessionId, @model, @path, @durationMs, @status, @content, @contentLen, @error, @needsApproval, @approvalId, @promptTokens, @completionTokens, @promptCacheHitTokens, @promptCacheMissTokens, @updatedAt, @startedAt, @finishedAt)
   `);
   const ts = nowIso();
   stmt.run({
@@ -448,6 +454,8 @@ function logCommand(r) {
     approvalId: r.approvalId || null,
     promptTokens: r.promptTokens != null ? r.promptTokens : null,
     completionTokens: r.completionTokens != null ? r.completionTokens : null,
+    promptCacheHitTokens: r.promptCacheHitTokens != null ? r.promptCacheHitTokens : null,
+    promptCacheMissTokens: r.promptCacheMissTokens != null ? r.promptCacheMissTokens : null,
     updatedAt: r.updatedAt || ts,
     startedAt: r.startedAt || null,
     finishedAt: r.finishedAt || null,
@@ -496,6 +504,8 @@ function finishCommandJob(id, r) {
     approval_id = @approvalId,
     prompt_tokens = @promptTokens,
     completion_tokens = @completionTokens,
+    prompt_cache_hit_tokens = @promptCacheHitTokens,
+    prompt_cache_miss_tokens = @promptCacheMissTokens,
     updated_at = @ts,
     finished_at = @ts
     WHERE id = @id`).run({
@@ -511,6 +521,8 @@ function finishCommandJob(id, r) {
       approvalId: r.approvalId || null,
       promptTokens: r.promptTokens != null ? r.promptTokens : null,
       completionTokens: r.completionTokens != null ? r.completionTokens : null,
+      promptCacheHitTokens: r.promptCacheHitTokens != null ? r.promptCacheHitTokens : null,
+      promptCacheMissTokens: r.promptCacheMissTokens != null ? r.promptCacheMissTokens : null,
       ts,
     });
   return getCommand(id);

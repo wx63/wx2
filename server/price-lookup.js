@@ -29,6 +29,8 @@ const LOOKALIKE_RE = /华强北|德乐|森系|高仿|原版|山寨|1\s*:\s*1|A�
 const LOOKALIKE_QUERY_RE = /华强北|德乐|森系|高仿|原版|山寨|A货/i;
 const SECONDHAND_RE = /二手|资源机|准新机|官翻|翻新/i;
 const SECONDHAND_QUERY_RE = /二手|资源机|准新机|官翻|翻新/i;
+const PRICE_CACHE_TTL_MS = 30 * 60 * 1000;
+const priceCache = new Map();
 
 function fetchText(url, timeoutMs = 25000) {
   const ctrl = new AbortController();
@@ -433,6 +435,19 @@ function formatLookupResult(query, cards, official, fetchedAt) {
 }
 
 async function lookupPrice(query) {
+  const key = String(query || '').trim().toLowerCase();
+  const cached = priceCache.get(key);
+  if (cached && Date.now() - cached.fetchedAtMs < PRICE_CACHE_TTL_MS) {
+    return { ...cached, data: { ...cached.data, cached: true } };
+  }
+  const result = await lookupPriceUncached(query);
+  if (result.ok) {
+    priceCache.set(key, { ...result, fetchedAtMs: Date.now() });
+  }
+  return result;
+}
+
+async function lookupPriceUncached(query) {
   if (isAutomotiveQuery(query)) {
     try {
       const auto = await lookupAutohomeGuidePrice(query);
@@ -466,23 +481,28 @@ async function lookupPrice(query) {
 
   const keyword = normalizeSearchQuery(query);
   const fetchedAt = new Date().toISOString();
-  const html = await fetchText(MANMANBU_SEARCH_URL + encodeURIComponent(keyword));
-  const allCards = extractManmanbuyCards(html);
-  let cards = allCards
-    .filter((c) => isRelevantItem(c.title, query))
-    .map((c) => ({ ...c, relevance: relevanceScore(c.title, query) }))
-    .filter((c) => c.relevance >= 3)
-    .filter((c) => !shouldSkipLookalike(c.title, query))
-    .filter((c) => !shouldSkipInternational(c.title, query))
-    .sort(compareCards);
-  if (!cards.length) {
+  let cards = [];
+  try {
+    const html = await fetchText(MANMANBU_SEARCH_URL + encodeURIComponent(keyword));
+    const allCards = extractManmanbuyCards(html);
     cards = allCards
-      .filter((c) => isGenericRelevantItem(c.title, query))
+      .filter((c) => isRelevantItem(c.title, query))
       .map((c) => ({ ...c, relevance: relevanceScore(c.title, query) }))
       .filter((c) => c.relevance >= 3)
       .filter((c) => !shouldSkipLookalike(c.title, query))
       .filter((c) => !shouldSkipInternational(c.title, query))
       .sort(compareCards);
+    if (!cards.length) {
+      cards = allCards
+        .filter((c) => isGenericRelevantItem(c.title, query))
+        .map((c) => ({ ...c, relevance: relevanceScore(c.title, query) }))
+        .filter((c) => c.relevance >= 3)
+        .filter((c) => !shouldSkipLookalike(c.title, query))
+        .filter((c) => !shouldSkipInternational(c.title, query))
+        .sort(compareCards);
+    }
+  } catch (e) {
+    console.warn('[price-lookup] manmanbuy source failed:', e.message);
   }
   if (!cards.length) {
     try {

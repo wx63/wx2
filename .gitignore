@@ -40,6 +40,7 @@ openclaw.json.bak*
 /data/*.db-*
 /data/approvals.json
 /data/archive/
+/data/backup/
 /data/backup-*/
 server/data/*.db
 server/data/*.db-*

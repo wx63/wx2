@@ -20,6 +20,17 @@ npm start
 ### 访问前端
 起好后端后，直接用浏览器打开 http://localhost:3001/ （Express 托管前端静态文件，前后端同源，无需双击 index.html）。开发环境默认开启公开注册，新账号为 viewer 只读权限；生产环境需在 `.env` 显式设置 `ALLOW_REGISTER=true`。
 
+### PM2 生产启动
+
+```powershell
+cd server
+npm install
+npm run start:prod
+# 首次保存进程快照，登录自启用 HKCU Run 调用 server/pm2-resurrect.ps1
+```
+
+日志输出到根目录 `logs/out.log` / `logs/err.log`，已安装 `pm2-logrotate`（50MB、保留 7 份）。
+
 ## 架构
 
 ```

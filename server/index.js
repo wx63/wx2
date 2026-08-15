@@ -16,6 +16,7 @@ const { runAgent, runAgentTools, detectAction } = require('./bridge');
 const { loadKnowledgeBase, retrieve, answer, fileStats } = require('./kb');
 const feishu = require('./feishu');
 const { lookupPrice } = require('./price-lookup');
+const { runDatabaseBackup } = require('./backup');
 const {
   db,
   DATA_DIR,
@@ -220,8 +221,42 @@ const registerLimiter = makeLimiter({ windowMs: 15 * 60 * 1000, max: 20 * limitS
 const commandLimiter = makeLimiter({ windowMs: 10 * 60 * 1000, max: 10 * limitScale, keyGenerator: userOrIpKey });
 const kbQueryLimiter = makeLimiter({ windowMs: 10 * 60 * 1000, max: 30 * limitScale, keyGenerator: userOrIpKey });
 
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+const loginFailures = new Map();
+
+function loginFailureKey(ip, email) {
+  return `${ip}:${email}`;
+}
+
+function isLoginLocked(key) {
+  const entry = loginFailures.get(key);
+  return !!entry && entry.until > Date.now();
+}
+
+function recordLoginFailure(key) {
+  const now = Date.now();
+  const entry = loginFailures.get(key) || { count: 0, until: 0 };
+  if (entry.until > 0 && entry.until <= now) {
+    entry.count = 0;
+    entry.until = 0;
+  }
+  entry.count += 1;
+  if (entry.count >= LOGIN_MAX_FAILURES) entry.until = now + LOGIN_LOCK_MS;
+  loginFailures.set(key, entry);
+}
+
 function validateEmail(email) {
   return typeof email === 'string' && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isStringField(value, max = 4000) {
+  return typeof value === 'string' && value.length <= max;
+}
+
+function rejectInvalid(req, res, field, error = '字段类型或长度不正确') {
+  audit(req, 'invalid_payload', 'request', null, { field });
+  return res.status(400).json({ ok: false, error });
 }
 
 const FAKE_PASSWORD_HASH = bcrypt.hashSync('fake-password-for-timing', 12);
@@ -509,6 +544,9 @@ async function runAgenticCommand(meta) {
   const result = await runAgentTools(prompt, TOOL_SCHEMAS, {
     maxRounds,
     sessionId: meta.sessionId,
+    onDelta: (delta) => {
+      if (typeof meta.onDelta === 'function') meta.onDelta(delta);
+    },
     executor: async (name, args) => {
       const def = AGENT_TOOL_DEFS.find(d => d.name === name);
       if (!def) return { output: '未知工具: ' + name };
@@ -570,7 +608,7 @@ async function runAgenticCommand(meta) {
     path: 'agentic',
     model: result.model || 'orchestrator',
   });
-  return { ok: true, runId, content: result.content, action: detectAction(command), steps: stats.steps, route: meta.routeName, routeAgent: meta.routeAgent, model: result.model, path: 'agentic', stats };
+  return { ok: true, runId, content: result.content, action: detectAction(command), steps: stats.steps, route: meta.routeName, routeAgent: meta.routeAgent, model: result.model, path: 'agentic', stats, usage: result.usage || {} };
 }
 
 function resolveAgentMode() {
@@ -710,7 +748,17 @@ function drainCommandQueue() {
 }
 
 async function processCommandJob(commandId, meta) {
-  const notify = (payload) => { if (typeof meta.onComplete === 'function') setImmediate(() => meta.onComplete(payload).catch(e => console.error('[command-job] callback error:', e))); };
+  const notify = (payload) => {
+    if (typeof meta.onComplete !== 'function') return;
+    setImmediate(() => {
+      try {
+        const result = meta.onComplete(payload);
+        if (result && typeof result.then === 'function') result.catch(e => console.error('[command-job] callback error:', e));
+      } catch (e) {
+        console.error('[command-job] callback error:', e);
+      }
+    });
+  };
   markCommandRunning(commandId);
   const startedAt = Date.now();
   const action = detectAction(meta.command);
@@ -720,6 +768,11 @@ async function processCommandJob(commandId, meta) {
     jobMeta.durationMs = Date.now() - startedAt;
     jobMeta.contentLen = (result.content || '').length;
     jobMeta.needsApproval = !!action;
+    const usage = result.usage || {};
+    jobMeta.promptTokens = usage.prompt_tokens != null ? usage.prompt_tokens : null;
+    jobMeta.completionTokens = usage.completion_tokens != null ? usage.completion_tokens : null;
+    jobMeta.promptCacheHitTokens = usage.prompt_cache_hit_tokens != null ? usage.prompt_cache_hit_tokens : null;
+    jobMeta.promptCacheMissTokens = usage.prompt_cache_miss_tokens != null ? usage.prompt_cache_miss_tokens : null;
 
     if (!result.ok) {
       jobMeta.status = 'error';
@@ -767,7 +820,7 @@ async function processCommandJob(commandId, meta) {
     }
     addActivity({ tag: action ? '审批' : '指令', color: action ? '#fbbf24' : '#6366f1', text: action ? `生成审批条目 ${approval.id}：${approval.title}` : `完成指令：${meta.command.slice(0, 30)}`, userId: meta.userId });
     logAudit({ userId: meta.userId, action: 'command_run', entityType: 'command', entityId: String(commandId), metadata: { needsApproval: !!action, approvalId: approval && approval.id }, ip: meta.ip, userAgent: meta.userAgent });
-    notify({ commandId, status: 'ok', content: result.content, approvalId: approval && approval.id, route: result.route });
+    notify({ commandId, status: 'ok', command: meta.command, content: result.content, approvalId: approval && approval.id, approval: approval ? getApproval(approval.id) : null, route: result.route });
   } catch (e) {
     console.error('[command-job] error:', e);
     finishCommandJob(commandId, { status: 'error', durationMs: Date.now() - startedAt, error: '内部错误', needsApproval: !!action });
@@ -876,23 +929,32 @@ app.post('/api/auth/register', registerLimiter, (req, res) => {
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   const normalizedEmail = String(email || '').trim().toLowerCase();
+  const lockKey = loginFailureKey(req.ip, normalizedEmail);
+  if (isLoginLocked(lockKey)) {
+    logAudit({ action: 'login_locked', metadata: { email: normalizedEmail }, ...requestMeta(req) });
+    return res.status(429).json({ ok: false, error: '尝试次数过多，请 15 分钟后再试' });
+  }
   const user = validateEmail(normalizedEmail) ? findUserByEmail(normalizedEmail) : null;
   const passwordString = typeof password === 'string' ? password : '';
   if (!user || user.status !== 'active') {
     await bcrypt.compare(passwordString, FAKE_PASSWORD_HASH);
+    recordLoginFailure(lockKey);
     logAudit({ action: 'login_failed', metadata: { email: normalizedEmail }, ...requestMeta(req) });
     return res.status(401).json({ ok: false, error: '\u90ae\u7bb1\u6216\u5bc6\u7801\u9519\u8bef' });
   }
   if (!passwordString) {
     await bcrypt.compare(passwordString, FAKE_PASSWORD_HASH);
+    recordLoginFailure(lockKey);
     logAudit({ userId: user.id, action: 'login_failed', entityType: 'user', entityId: String(user.id), ...requestMeta(req) });
     return res.status(401).json({ ok: false, error: '\u90ae\u7bb1\u6216\u5bc6\u7801\u9519\u8bef' });
   }
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) {
+    recordLoginFailure(lockKey);
     logAudit({ userId: user.id, action: 'login_failed', entityType: 'user', entityId: String(user.id), ...requestMeta(req) });
     return res.status(401).json({ ok: false, error: '邮箱或密码错误' });
   }
+  loginFailures.delete(lockKey);
   loginSession(req, user, err => {
     if (err) return res.status(500).json({ ok: false, error: '登录失败，请稍后重试' });
     updateLastLogin(user.id);
@@ -959,10 +1021,13 @@ app.get('/api/orders/stats', requireRole('operator', 'admin'), (req, res) => {
 
 app.post('/api/orders', requireRole('operator', 'admin'), (req, res) => {
   const data = req.body || {};
-  if (!data.orderNo) return res.status(400).json({ ok: false, error: '缺少 orderNo' });
-  if (data.status !== undefined && data.status !== null && data.status !== '' && !['pending','paid','shipped','delivered','cancelled'].includes(data.status)) {
-    return res.status(400).json({ ok: false, error: '非法订单状态' });
+  if (!isStringField(data.orderNo, 80) || !data.orderNo.trim()) return rejectInvalid(req, res, 'orderNo', 'orderNo 必须为非空字符串且不超过 80 字符');
+  if (data.status != null && !['pending','paid','shipped','delivered','cancelled'].includes(data.status)) return rejectInvalid(req, res, 'status', '非法订单状态');
+  for (const field of ['customerName', 'channel', 'country', 'product', 'sku', 'trackingNo', 'carrier', 'note']) {
+    if (data[field] != null && !isStringField(data[field], field === 'note' ? 500 : 200)) return rejectInvalid(req, res, field);
   }
+  if (data.qty != null && (!Number.isFinite(Number(data.qty)) || Number(data.qty) < 1)) return rejectInvalid(req, res, 'qty', 'qty 必须为正数');
+  if (data.amount != null && !Number.isFinite(Number(data.amount))) return rejectInvalid(req, res, 'amount', 'amount 必须为数字');
   try {
     const order = addOrder(data);
     addActivity({ tag: '\u8ba2\u5355', color: '#60a5fa', text: '\u8ba2\u5355\u53d8\u66f4 ' + order.orderNo, userId: req.user.id });
@@ -975,9 +1040,12 @@ app.post('/api/orders', requireRole('operator', 'admin'), (req, res) => {
 
 app.patch('/api/orders/:id', requireRole('operator', 'admin'), (req, res) => {
   const body = req.body || {};
-  if (body.status !== undefined && body.status !== null && body.status !== '' && !['pending','paid','shipped','delivered','cancelled'].includes(body.status)) {
-    return res.status(400).json({ ok: false, error: '非法订单状态' });
+  if (body.status != null && !['pending','paid','shipped','delivered','cancelled'].includes(body.status)) return rejectInvalid(req, res, 'status', '非法订单状态');
+  for (const field of ['orderNo', 'customerName', 'channel', 'country', 'product', 'sku', 'trackingNo', 'carrier', 'note']) {
+    if (body[field] != null && !isStringField(body[field], field === 'note' ? 500 : field === 'orderNo' ? 80 : 200)) return rejectInvalid(req, res, field);
   }
+  if (body.qty != null && (!Number.isFinite(Number(body.qty)) || Number(body.qty) < 1)) return rejectInvalid(req, res, 'qty', 'qty 必须为正数');
+  if (body.amount != null && !Number.isFinite(Number(body.amount))) return rejectInvalid(req, res, 'amount', 'amount 必须为数字');
   const order = updateOrder(req.params.id, body);
   if (!order) return res.status(404).json({ ok: false, error: '\u8ba2\u5355\u4e0d\u5b58\u5728' });
   addActivity({ tag: '订单', color: '#60a5fa', text: '订单更新 ' + order.orderNo, userId: req.user.id });
@@ -1024,7 +1092,9 @@ app.get('/api/reports', (req, res) => {
 });
 app.post('/api/reports', requireRole('operator', 'admin'), (req, res) => {
   const { agent, title, tag, color, content } = req.body || {};
-  if (!title || typeof title !== 'string') return res.status(400).json({ ok: false, error: '缺少 title 字段' });
+  if (!isStringField(title, 300) || !title.trim()) return rejectInvalid(req, res, 'title', 'title 必须为非空字符串且不超过 300 字符');
+  if (content != null && !isStringField(content, 8000)) return rejectInvalid(req, res, 'content', 'content 必须为字符串且不超过 8000 字符');
+  if (agent != null && (!Number.isFinite(Number(agent)) || Number(agent) < 0)) return rejectInvalid(req, res, 'agent', 'agent 必须为非负数字');
   const report = addReport({ agent, title, tag, color, content, userId: req.user.id });
   res.status(201).json({ ok: true, data: report });
 });
@@ -1032,7 +1102,10 @@ app.post('/api/reports', requireRole('operator', 'admin'), (req, res) => {
 app.get('/api/settings', (req, res) => res.json({ ok: true, data: getSettings(req.user.id) }));
 app.patch('/api/settings', requireRole('operator', 'admin'), (req, res) => {
   const { key, value } = req.body || {};
-  if (!key || typeof key !== 'string') return res.status(400).json({ ok: false, error: '缺少 key 字段' });
+  if (!isStringField(key, 100) || !key.trim()) return rejectInvalid(req, res, 'key', 'key 必须为非空字符串且不超过 100 字符');
+  let valueSize = 0;
+  try { valueSize = JSON.stringify(value).length; } catch { return rejectInvalid(req, res, 'value', 'value 不是合法 JSON 值'); }
+  if (valueSize > 10000) return rejectInvalid(req, res, 'value', 'value 序列化后不能超过 10000 字符');
   try {
     const settings = setSetting(req.user.id, key, value);
     audit(req, 'settings_update', 'setting', key);
@@ -1139,6 +1212,39 @@ app.post('/api/command', commandLimiter, requireRole('operator', 'admin'), (req,
     userAgent: req.get('user-agent') || '',
   };
   const commandId = createCommandJob(meta);
+  const wantsStream = (req.body && req.body.stream === true) || req.query.stream === '1';
+  if (wantsStream) {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    let finished = false;
+    const writeEvent = (event, payload) => {
+      if (finished || res.writableEnded) return;
+      try {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+      } catch (_) {}
+    };
+    writeEvent('accepted', { ok: true, commandId, status: 'queued' });
+    const streamMeta = {
+      ...meta,
+      onDelta: (delta) => writeEvent('delta', { content: String(delta || '') }),
+      onComplete: (payload) => {
+        if (finished) return;
+        writeEvent('complete', payload);
+        writeEvent('done', {});
+        finished = true;
+        res.end();
+      },
+    };
+    enqueueCommand(commandId, streamMeta);
+    req.on('close', () => { finished = true; });
+    audit(req, 'command_queued', 'command', String(commandId), { needsApproval: !!action, stream: true });
+    return;
+  }
+
   enqueueCommand(commandId, meta);
   audit(req, 'command_queued', 'command', String(commandId), { needsApproval: !!action });
   res.status(202).json({ ok: true, commandId, status: 'queued' });
@@ -1157,6 +1263,8 @@ function commandResponse(row) {
     approval: row.approvalId ? getApproval(row.approvalId) : null,
     run: row.runId ? getAgentRun(row.runId) : null,
     durationMs: row.durationMs,
+    promptCacheHitTokens: row.promptCacheHitTokens,
+    promptCacheMissTokens: row.promptCacheMissTokens,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     startedAt: row.startedAt,
@@ -1183,7 +1291,8 @@ app.get('/api/integrations/feishu', requireRole('operator', 'admin'), (req, res)
 
 app.post('/api/integrations/feishu/send', requireRole('operator', 'admin'), async (req, res) => {
   const { chatId, text } = req.body || {};
-  if (!chatId || !text) return res.status(400).json({ ok: false, error: '缺少 chatId 或 text' });
+  if (!isStringField(chatId, 200) || !chatId.trim()) return rejectInvalid(req, res, 'chatId', 'chatId 必须为非空字符串且不超过 200 字符');
+  if (!isStringField(text, 4000) || !text.trim()) return rejectInvalid(req, res, 'text', 'text 必须为非空字符串且不超过 4000 字符');
   try {
     const result = await feishu.sendText(String(chatId), String(text));
     audit(req, 'feishu_send', 'feishu_message', null, { chatId });
@@ -1319,20 +1428,43 @@ app.use((err, req, res, next) => {
 
 // ---------- lightweight scheduler ----------
 const DAILY_DIGEST_MINUTE = Number(process.env.DAILY_DIGEST_MINUTE ?? 9 * 60);
+const DAILY_BACKUP_MINUTE = Number(process.env.DAILY_BACKUP_MINUTE ?? 3 * 60);
 const SCHEDULER_INTERVAL_MS = Number(process.env.SCHEDULER_INTERVAL_MS || 60 * 1000);
+const FEISHU_ALERT_CHAT_ID = process.env.FEISHU_ALERT_CHAT_ID || '';
 let lastDigestAt = null;
+let lastBackupDate = null;
+let schedulerFailures = 0;
 
 function startScheduler() {
   setInterval(() => {
-    const now = new Date();
-    const minutes = now.getHours() * 60 + now.getMinutes();
-    if (lastDigestAt && now - lastDigestAt < 60 * 60 * 1000) return;
-    if (Math.abs(minutes - DAILY_DIGEST_MINUTE) <= 1) {
-      lastDigestAt = now;
-      try {
+    try {
+      const now = new Date();
+      const minutes = now.getHours() * 60 + now.getMinutes();
+      const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      if ((!lastDigestAt || now - lastDigestAt >= 60 * 60 * 1000) && Math.abs(minutes - DAILY_DIGEST_MINUTE) <= 1) {
+        lastDigestAt = now;
         const orders = orderStats();
         addActivity({ tag: 'daily', color: '#6366f1', text: 'scheduled digest: orders=' + orders.total + ', pending=' + orders.pending + ', shipped=' + orders.shipped, userId: null });
-      } catch (e) { console.error('[scheduler] digest error:', e); }
+      }
+
+      if (lastBackupDate !== todayKey && Math.abs(minutes - DAILY_BACKUP_MINUTE) <= 1) {
+        const backup = runDatabaseBackup();
+        lastBackupDate = todayKey;
+        addActivity({ tag: 'daily', color: '#34d399', text: '数据库已备份：' + backup.file, userId: null });
+        console.log('[scheduler] database backup:', backup.file, backup.size + ' bytes');
+      }
+      schedulerFailures = 0;
+    } catch (e) {
+      schedulerFailures += 1;
+      console.error('[scheduler] tick error:', e);
+      try {
+        logAudit({ action: 'scheduler_error', metadata: { failures: schedulerFailures, error: e.message || String(e) } });
+      } catch (_) {}
+      if (schedulerFailures >= 3 && FEISHU_ALERT_CHAT_ID) {
+        feishu.sendText(FEISHU_ALERT_CHAT_ID, `[调度器告警] 连续 ${schedulerFailures} 次执行失败：${e.message || e}`)
+          .catch(err => console.error('[scheduler] alert send failed:', err.message));
+      }
     }
   }, SCHEDULER_INTERVAL_MS);
   console.log('[scheduler] started, interval=' + SCHEDULER_INTERVAL_MS + 'ms');
