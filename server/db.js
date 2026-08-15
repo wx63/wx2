@@ -209,6 +209,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
   CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 
+  CREATE TABLE IF NOT EXISTS id_seq (
+    name TEXT PRIMARY KEY,
+    seq  INTEGER NOT NULL DEFAULT 0
+  );
+
   CREATE TABLE IF NOT EXISTS settings (
     user_id     INTEGER NOT NULL,
     key         TEXT NOT NULL,
@@ -964,11 +969,31 @@ function listOrders({ limit = 100, offset = 0, status = 'all', search = '' } = {
   return { total, limit, offset, items: rows.map(orderRow) };
 }
 
+const ORDER_STATUSES = ['pending', 'paid', 'shipped', 'delivered', 'cancelled'];
+
+function ensureOrderSeq() {
+  const row = db.prepare('SELECT MAX(CAST(substr(id, 5) AS INTEGER)) AS maxSeq FROM orders').get();
+  const current = db.prepare("SELECT seq FROM id_seq WHERE name = 'order'").get();
+  const maxSeq = row && row.maxSeq ? Number(row.maxSeq) : 0;
+  const currentSeq = current ? Number(current.seq) : 0;
+  if (!current || currentSeq < maxSeq) {
+    db.prepare(`INSERT INTO id_seq (name, seq) VALUES ('order', @seq)
+      ON CONFLICT(name) DO UPDATE SET seq = MAX(seq, @seq)`).run({ seq: maxSeq });
+  }
+}
+
+function nextOrderSeq() {
+  ensureOrderSeq();
+  db.prepare(`INSERT INTO id_seq (name, seq) VALUES ('order', 0)
+    ON CONFLICT(name) DO UPDATE SET seq = seq + 1`).run();
+  return Number(db.prepare("SELECT seq FROM id_seq WHERE name = 'order'").get().seq);
+}
+
 function addOrder(data) {
-  const seq = Number(db.prepare('SELECT COUNT(*) AS n FROM orders').get().n) + 1;
+  const seq = nextOrderSeq();
   const id = 'ORD-' + String(seq).padStart(5, '0');
   const orderNo = String(data.orderNo || id);
-  db.prepare(`INSERT OR REPLACE INTO orders (id, order_no, customer_name, channel, country, product, sku, qty, amount, currency, status, tracking_no, carrier, note)
+  db.prepare(`INSERT INTO orders (id, order_no, customer_name, channel, country, product, sku, qty, amount, currency, status, tracking_no, carrier, note)
     VALUES (@id, @orderNo, @customerName, @channel, @country, @product, @sku, @qty, @amount, @currency, @status, @trackingNo, @carrier, @note)`).run({
     id,
     orderNo: orderNo.slice(0, 80),
@@ -1023,9 +1048,18 @@ function deleteOrder(id) {
 function orderStats() {
   const total = Number(db.prepare('SELECT COUNT(*) AS n FROM orders').get().n);
   const today = Number(db.prepare("SELECT COUNT(*) AS n FROM orders WHERE date(created_at) = date('now')").get().n);
-  const pending = Number(db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'").get().n);
-  const shipped = Number(db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'shipped'").get().n);
-  return { total, today, pending, shipped };
+  const rows = db.prepare('SELECT status, COUNT(*) AS n FROM orders GROUP BY status').all();
+  const byStatus = Object.fromEntries(rows.map(r => [r.status, Number(r.n)]));
+  return {
+    total,
+    today,
+    pending: byStatus['pending'] || 0,
+    shipped: byStatus['shipped'] || 0,
+    paid: byStatus['paid'] || 0,
+    delivered: byStatus['delivered'] || 0,
+    cancelled: byStatus['cancelled'] || 0,
+    byStatus,
+  };
 }
 function listReports(limit = 20) {
   return db.prepare('SELECT * FROM reports ORDER BY created_at DESC LIMIT ?').all(limit).map(row => ({

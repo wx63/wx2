@@ -18,7 +18,7 @@ npm start
 ```
 
 ### 访问前端
-起好后端后，直接用浏览器打开 http://localhost:3001/ （Express 托管前端静态文件，前后端同源，无需双击 index.html）。公开注册已关闭，首次启动空数据库前请在 `.env` 配置 `ADMIN_EMAIL` / `ADMIN_PASSWORD` 初始化管理员账号。
+起好后端后，直接用浏览器打开 http://localhost:3001/ （Express 托管前端静态文件，前后端同源，无需双击 index.html）。开发环境默认开启公开注册，新账号为 viewer 只读权限；生产环境需在 `.env` 显式设置 `ALLOW_REGISTER=true`。
 
 ## 架构
 
@@ -55,7 +55,8 @@ skills/           # 自定义技能（SKILL.md）
 | PORT | 3001 | 后端端口 |
 | SESSION_SECRET | replace-me | 会话签名密钥；生产环境必须改 |
 | CORS_ORIGIN | 空 | 为空时不启用 CORS；如需跨域只填精确白名单 |
-| ADMIN_EMAIL / ADMIN_PASSWORD | 空 | 数据库无用户时自动创建首个 admin；公开注册已关闭，空库未配置则无法登录 |
+| ALLOW_REGISTER | development true / production false | 是否允许公开注册；新账号固定为 viewer 只读权限 |
+| ADMIN_EMAIL / ADMIN_PASSWORD | 空 | 数据库无用户时自动创建首个 admin；未开启注册且空库未配置则无法登录 |
 | OPENCLAW_DIRECT_MODEL | deepseek/deepseek-chat | 快路径模型，形如 <provider>/<model> |
 | OPENCLAW_DIRECT_TIMEOUT_MS | 30000 | 直连超时 |
 | OPENCLAW_GATEWAY_URL | http://127.0.0.1:18789 | Gateway 兜底地址 |

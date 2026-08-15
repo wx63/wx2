@@ -11,6 +11,7 @@ process.env.SESSION_SECRET = 'test-secret-change-me';
 process.env.ADMIN_EMAIL = 'admin@example.com';
 process.env.ADMIN_PASSWORD = 'password123';
 process.env.ADMIN_NAME = 'Admin';
+process.env.ALLOW_REGISTER = 'true';
 process.env.OPENCLAW_DIRECT_TIMEOUT_MS = '100';
 process.env.OPENCLAW_GATEWAY_TIMEOUT_MS = '100';
 process.env.OPENCLAW_PROVIDER_BASE_URL = 'http://127.0.0.1:9';
@@ -94,6 +95,49 @@ test('login and session cookie', async () => {
   const me = await f('/api/auth/me');
   assert.equal(me.status, 200);
   assert.equal((await me.json()).user.email, 'admin@example.com');
+});
+
+test('public registration creates least-privilege viewer session', async () => {
+  const f = cookieFetch(ctx.base);
+  const status = await f('/api/auth/register-status');
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).data.enabled, true);
+
+  const resp = await f('/api/auth/register', jsonReq('POST', {
+    name: 'New User',
+    email: 'newuser@example.com',
+    password: 'password123',
+    confirmPassword: 'password123',
+  }));
+  assert.equal(resp.status, 201);
+  const body = await resp.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.user.email, 'newuser@example.com');
+  assert.equal(body.user.role, 'viewer');
+  assert.equal(body.user.password_hash, undefined);
+
+  const dashboard = await f('/api/dashboard');
+  assert.equal(dashboard.status, 200);
+
+  const report = await f('/api/reports', jsonReq('POST', { title: 'x' }));
+  assert.equal(report.status, 403);
+});
+
+test('public registration rejects duplicate email and mismatched passwords', async () => {
+  const f = cookieFetch(ctx.base);
+  const duplicate = await f('/api/auth/register', jsonReq('POST', {
+    email: 'newuser@example.com',
+    password: 'password123',
+    confirmPassword: 'password123',
+  }));
+  assert.equal(duplicate.status, 409);
+
+  const mismatch = await f('/api/auth/register', jsonReq('POST', {
+    email: 'another@example.com',
+    password: 'password123',
+    confirmPassword: 'different1',
+  }));
+  assert.equal(mismatch.status, 400);
 });
 
 test('permissions for anonymous, viewer, operator, admin', async () => {
@@ -272,6 +316,60 @@ test('local order CRUD and stats endpoint works', async () => {
   assert.equal(stats.status, 200);
   const statsBody = await stats.json();
   assert.ok(statsBody.data.total >= 1);
+});
+
+test('viewer cannot read order list or stats', async () => {
+  const viewer = await loginAs('viewer@example.com');
+  assert.equal((await viewer('/api/orders')).status, 403);
+  assert.equal((await viewer('/api/orders/stats')).status, 403);
+});
+
+test('order status validation rejects invalid status on create and update', async () => {
+  const admin = await loginAs('admin@example.com');
+  const created = await admin('/api/orders', jsonReq('POST', { orderNo: 'ORD-STATUS-BAD', status: 'not_a_status' }));
+  assert.equal(created.status, 400);
+  const good = await admin('/api/orders', jsonReq('POST', { orderNo: 'ORD-STATUS-OK', status: 'paid' }));
+  assert.equal(good.status, 201);
+  const order = (await good.json()).data;
+  const patched = await admin('/api/orders/' + order.id, jsonReq('PATCH', { status: 'not_a_status' }));
+  assert.equal(patched.status, 400);
+});
+
+test('malformed JSON returns 400 and oversized JSON returns 413', async () => {
+  const admin = await loginAs('admin@example.com');
+  const malformed = await fetch(ctx.base + '/api/reports', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{"title": ',
+  });
+  assert.equal(malformed.status, 400);
+  const oversized = await fetch(ctx.base + '/api/reports', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'x', content: 'a'.repeat(2 * 1024 * 1024 + 1) }),
+  });
+  assert.equal(oversized.status, 413);
+});
+
+test('order id sequence does not reuse deleted order ids', async () => {
+  const admin = await loginAs('admin@example.com');
+  const a = await admin('/api/orders', jsonReq('POST', { orderNo: 'ORD-SEQ-A' }));
+  const b = await admin('/api/orders', jsonReq('POST', { orderNo: 'ORD-SEQ-B' }));
+  assert.equal(a.status, 201);
+  assert.equal(b.status, 201);
+  const aBody = (await a.json()).data;
+  const bBody = (await b.json()).data;
+  assert.ok(aBody.id < bBody.id);
+  const del = await admin('/api/orders/' + aBody.id, { method: 'DELETE' });
+  assert.equal(del.status, 200);
+  const c = await admin('/api/orders', jsonReq('POST', { orderNo: 'ORD-SEQ-C' }));
+  assert.equal(c.status, 201);
+  const cBody = (await c.json()).data;
+  assert.ok(cBody.id > bBody.id);
+  const listed = await admin('/api/orders?search=ORD-SEQ-B');
+  assert.equal(listed.status, 200);
+  const listBody = await listed.json();
+  assert.ok(listBody.data.items.some(o => o.id === bBody.id && o.orderNo === 'ORD-SEQ-B'));
 });
 
 test('feishu integration status endpoint is available', async () => {

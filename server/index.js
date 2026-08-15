@@ -71,6 +71,7 @@ const {
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
 const isProduction = process.env.NODE_ENV === 'production';
+const allowPublicRegister = process.env.ALLOW_REGISTER === 'true' || (process.env.NODE_ENV !== 'production' && process.env.ALLOW_REGISTER !== 'false');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const SESSION_SECRET = process.env.SESSION_SECRET || (isProduction ? '' : 'dev-only-change-me');
 
@@ -814,9 +815,62 @@ app.get('/api/health', requireAuth, (req, res) => {
   });
 });
 
+app.get('/api/auth/register-status', (req, res) => {
+  res.json({ ok: true, data: { enabled: allowPublicRegister, defaultRole: 'viewer' } });
+});
+
 app.post('/api/auth/register', registerLimiter, (req, res) => {
-  logAudit({ action: 'register_blocked', metadata: { reason: 'public_registration_disabled' }, ...requestMeta(req) });
-  res.status(403).json({ ok: false, error: '公开注册已关闭，请联系管理员创建账号' });
+  if (!allowPublicRegister) {
+    logAudit({ action: 'register_blocked', metadata: { reason: 'public_registration_disabled' }, ...requestMeta(req) });
+    return res.status(403).json({ ok: false, error: '公开注册已关闭，请联系管理员创建账号' });
+  }
+
+  const { name, email, password, confirmPassword } = req.body || {};
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const passwordString = typeof password === 'string' ? password : '';
+  const confirmString = typeof confirmPassword === 'string' ? confirmPassword : '';
+
+  if (!validateEmail(normalizedEmail)) {
+    logAudit({ action: 'register_failed', metadata: { reason: 'invalid_email' }, ...requestMeta(req) });
+    return res.status(400).json({ ok: false, error: '邮箱格式不正确' });
+  }
+  if (passwordString.length < 8 || passwordString.length > 128) {
+    logAudit({ action: 'register_failed', metadata: { reason: 'invalid_password' }, ...requestMeta(req) });
+    return res.status(400).json({ ok: false, error: '密码至少 8 位，最长 128 位' });
+  }
+  if (passwordString !== confirmString) {
+    logAudit({ action: 'register_failed', metadata: { reason: 'password_mismatch' }, ...requestMeta(req) });
+    return res.status(400).json({ ok: false, error: '两次输入的密码不一致' });
+  }
+  if (findUserByEmail(normalizedEmail)) {
+    logAudit({ action: 'register_failed', metadata: { reason: 'email_exists' }, ...requestMeta(req) });
+    return res.status(409).json({ ok: false, error: '该邮箱已注册，请直接登录' });
+  }
+
+  let user;
+  try {
+    user = createUser({
+      email: normalizedEmail,
+      name: String(name || '').trim().slice(0, 80) || normalizedEmail.split('@')[0],
+      passwordHash: bcrypt.hashSync(passwordString, 12),
+      role: 'viewer',
+    });
+  } catch (e) {
+    if (String(e && e.message || '').includes('UNIQUE')) {
+      logAudit({ action: 'register_failed', metadata: { reason: 'email_exists' }, ...requestMeta(req) });
+      return res.status(409).json({ ok: false, error: '该邮箱已注册，请直接登录' });
+    }
+    throw e;
+  }
+
+  audit(req, 'register', 'user', String(user.id), { role: 'viewer' });
+  loginSession(req, user, (err) => {
+    if (err) {
+      return res.status(201).json({ ok: true, user: toSafeUser(user), message: '账号已创建，请登录' });
+    }
+    req.user = toSafeUser(findUserById(user.id));
+    res.status(201).json({ ok: true, user: req.user });
+  });
 });
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
@@ -891,7 +945,7 @@ app.patch('/api/agents/:id/skills/:skillIndex', requireRole('operator', 'admin')
 });
 
 
-app.get('/api/orders', requireAuth, (req, res) => {
+app.get('/api/orders', requireRole('operator', 'admin'), (req, res) => {
   const limit = Math.min(500, Math.max(1, +req.query.limit || 100));
   const offset = Math.max(0, +req.query.offset || 0);
   const status = String(req.query.status || 'all');
@@ -899,13 +953,16 @@ app.get('/api/orders', requireAuth, (req, res) => {
   res.json({ ok: true, data: listOrders({ limit, offset, status, search }) });
 });
 
-app.get('/api/orders/stats', requireAuth, (req, res) => {
+app.get('/api/orders/stats', requireRole('operator', 'admin'), (req, res) => {
   res.json({ ok: true, data: orderStats() });
 });
 
 app.post('/api/orders', requireRole('operator', 'admin'), (req, res) => {
   const data = req.body || {};
   if (!data.orderNo) return res.status(400).json({ ok: false, error: '缺少 orderNo' });
+  if (data.status !== undefined && data.status !== null && data.status !== '' && !['pending','paid','shipped','delivered','cancelled'].includes(data.status)) {
+    return res.status(400).json({ ok: false, error: '非法订单状态' });
+  }
   try {
     const order = addOrder(data);
     addActivity({ tag: '\u8ba2\u5355', color: '#60a5fa', text: '\u8ba2\u5355\u53d8\u66f4 ' + order.orderNo, userId: req.user.id });
@@ -917,7 +974,11 @@ app.post('/api/orders', requireRole('operator', 'admin'), (req, res) => {
 });
 
 app.patch('/api/orders/:id', requireRole('operator', 'admin'), (req, res) => {
-  const order = updateOrder(req.params.id, req.body || {});
+  const body = req.body || {};
+  if (body.status !== undefined && body.status !== null && body.status !== '' && !['pending','paid','shipped','delivered','cancelled'].includes(body.status)) {
+    return res.status(400).json({ ok: false, error: '非法订单状态' });
+  }
+  const order = updateOrder(req.params.id, body);
   if (!order) return res.status(404).json({ ok: false, error: '\u8ba2\u5355\u4e0d\u5b58\u5728' });
   addActivity({ tag: '订单', color: '#60a5fa', text: '订单更新 ' + order.orderNo, userId: req.user.id });
   audit(req, 'order_update', 'order', order.id);
@@ -1247,8 +1308,13 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   if (err && err.message === 'CORS origin denied') return res.status(403).json({ ok: false, error: 'CORS origin denied' });
-  console.error('[server] error:', err);
-  res.status(500).json({ ok: false, error: '内部错误' });
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error('[server] error:', err);
+  const msg = status >= 500 ? '内部错误'
+    : err.type === 'entity.parse.failed' ? '请求体 JSON 格式错误'
+    : err.type === 'entity.too.large' ? '请求体过大'
+    : '请求无效';
+  res.status(status).json({ ok: false, error: msg });
 });
 
 // ---------- lightweight scheduler ----------
