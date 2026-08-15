@@ -51,13 +51,47 @@ const APPROVAL_STATUS = { pending: "待审批", approved: "已批准", rejected:
 // ================================================================
 //  指令路由：运营总监意图识别（关键词路由 → Agent）
 // ================================================================
-const ROUTE_RULES = [
+const FALLBACK_ROUTE_RULES = [
   { agent: 0, kw: ["竞品","周报","调研","趋势","选品","voc","评论","市场"], tag: "调研", color: "#60a5fa" },
   { agent: 1, kw: ["listing","标题","seo","脚本","文案","多语种","本地化","爆款"], tag: "内容", color: "#a855f7" },
   { agent: 2, kw: ["发帖","社媒","排期","种草","reddit","tiktok","x 账号","矩阵"], tag: "获客", color: "#fb7185" },
   { agent: 3, kw: ["客户","回复","物流","查单","退换货","客服","询","moq","尺码"], tag: "客服", color: "#34d399" },
   { agent: 4, kw: ["审查","侵权","敏感词","fda","水印","广告","roas","合规","上架前"], tag: "合规", color: "#fbbf24" },
 ];
+let ROUTE_RULES = FALLBACK_ROUTE_RULES;
+
+const FALLBACK_ACTION_RULES = [
+  { action: "social_post", label: "社媒发帖/回复", kw: ["发帖", "发推", "发布", "发消息", "回复客户", "回复买家", "推广帖", "推文", "发一条", "发个", "发一个", "发新品", "发广告"] },
+  { action: "listing_submit", label: "商品上架", kw: ["上架", "上新产品", "提交 listing", "提交listing", "上传产品", "上架产品", "上新", "更新 listing", "更新listing"] },
+  { action: "purchase", label: "采购/下单", kw: ["下单", "购买", "采购", "进货", "补货", "采购一批", "买一批"] },
+  { action: "refund", label: "退款/赔偿", kw: ["退款", "退钱", "赔偿", "补偿", "退我钱"] },
+];
+let ACTION_RULES = FALLBACK_ACTION_RULES;
+
+function detectAction(cmd) {
+  const lower = String(cmd || "").toLowerCase();
+  for (const rule of ACTION_RULES) {
+    if ((rule.kw || []).some(k => lower.includes(String(k).toLowerCase()))) return rule.action;
+    for (const pattern of rule.patterns || []) {
+      if (pattern.test(lower)) return rule.action;
+    }
+  }
+  return null;
+}
+
+async function loadRulesFromServer() {
+  try {
+    const data = await apiJson("/api/rules");
+    const rules = data.data || {};
+    if (Array.isArray(rules.routeRules) && rules.routeRules.length) ROUTE_RULES = rules.routeRules;
+    if (Array.isArray(rules.actionRules) && rules.actionRules.length) {
+      ACTION_RULES = rules.actionRules.map(r => ({ ...r, patterns: (r.patterns || []).map(src => new RegExp(src, "i")) }));
+    }
+  } catch (e) {
+    console.warn("[rules] 规则接口拉取失败，使用本地兜底副本：", e.message);
+  }
+}
+
 function routeCommand(cmd) {
   const lower = cmd.toLowerCase();
   let target = { agent: null, tag: "通用", color: "var(--brand)" };
@@ -1819,6 +1853,7 @@ async function loadApprovalsFromServer() {
 // \u771F\u5B9E\u6267\u884C runCommand\uFF1A\u5C55\u793A\u540E\u7AEF Agent \u7F16\u6392\u6B65\u9AA4\uFF0C\u4E0D\u518D\u4F7F\u7528\u524D\u7AEF\u6A21\u62DF\u6B65\u9AA4
 async function runCommand(cmd, opts = {}) {
   const { agentIdx: presetAgent, tag: presetTag, color: presetColor } = opts;
+  const detectedAction = detectAction(cmd);
   const route = routeCommand(cmd);
   const agentIdx = presetAgent != null ? presetAgent : route.agentIdx;
   const tag = presetTag || route.tag;
@@ -1834,7 +1869,7 @@ async function runCommand(cmd, opts = {}) {
   };
 
   try {
-    push('\u8DEF\u7531', '\u5DF2\u63D0\u4EA4\u7ED9\u8FD0\u8425\u603B\u76D1\uFF0C\u540E\u7AEF Agent \u6B63\u5728\u62C6\u89E3\u4EFB\u52A1\u3002', '\u8DEF\u7531', true);
+    push('\u8DEF\u7531', detectedAction ? '\u8BC6\u522B\u5230\u5BF9\u5916\u52A8\u4F5C\uFF0C\u5DF2\u8FDB\u5165\u5BA1\u6279\u95F8\u95E8\uFF0C\u7B49\u5F85\u540E\u7AEF\u751F\u6210\u5BA1\u6279\u8349\u7A3F\u3002' : '\u5DF2\u63D0\u4EA4\u7ED9\u8FD0\u8425\u603B\u76D1\uFF0C\u540E\u7AEF Agent \u6B63\u5728\u62C6\u89E3\u4EFB\u52A1\u3002', '\u8DEF\u7531', true);
     push('\u6267\u884C', '\u6307\u4EE4\u5DF2\u5165\u961F\uFF0C\u7B49\u5F85 Agent \u7F16\u6392\u5668\u8FD4\u56DE\u771F\u5B9E\u6B65\u9AA4\u3002', tag, false);
     pushFeed(tag, color, `\u63D0\u4EA4\u5F02\u6B65\u6307\u4EE4\uFF1A${cmd.slice(0, 30)}`);
 
@@ -1963,6 +1998,7 @@ async function runKbQuery(question) {
 async function bootstrap() {
   const user = await loadUser();
   if (!user) return;
+  await loadRulesFromServer();
   await loadHealthStatus();
   try { await loadDashboardData(); }
   catch (e) { showToast(`⚠ 仪表盘数据加载失败：${e.message}`); }
