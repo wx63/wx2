@@ -22,6 +22,7 @@
 | “重启服务” | `npx pm2 restart ecommerce-agent --update-env` |
 | “提交 / 推送 / 存一下” | `git add` 对应文件 → 分组合并提交 → `git push origin master:main` |
 | “部署 / 上传服务器 / 更新远程” | 读 `docs/deploy-cloud.md`；生成**不含 data 的代码更新包**；给出覆盖和重启命令 |
+| “现在部署上服务器 / 让 OpenClaw 执行” | 读 `DEPLOY.md`，按里面 A/B 方式执行；先确认 PM2 目录，再更新包/重启/验证 |
 | “写文档 / 存一个 md / 让 OpenClaw 听懂” | 更新 `MEMORY.md`、`AGENTS.md`、`docs/`、`memory/YYYY-MM-DD.md` |
 | “修复登录 / 打开是空壳 / 401” | 检查会话 Cookie、认证中间件、前端跳转逻辑；HTTP 部署需 `SESSION_COOKIE_SECURE=auto` |
 | “发帖 / 上架 / 下单 / 退款” | 只生成审批草稿，等待人工批准；不得真实执行 |
