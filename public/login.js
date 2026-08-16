@@ -211,13 +211,6 @@ document.getElementById("registerForm")?.addEventListener("submit", async (e) =>
   } catch {}
 })();
 
-// ============ OAuth ============
-document.querySelectorAll(".oauth-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    showToast(`${btn.dataset.provider} 登录待接入后端 OAuth`);
-  });
-});
-
 // ============ Toast ============
 let toastTimer;
 function showToast(msg) {

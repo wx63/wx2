@@ -1220,7 +1220,40 @@ button { font-family: inherit; }
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .ap-type-chip { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 5px; }
+.ap-review-chip { font-size: 10px; font-weight: 700; color: #b45309; background: rgba(251,191,36,.16); border: 1px solid rgba(251,191,36,.45); padding: 2px 7px; border-radius: 5px; margin-left: 4px; }
 .ap-id { font-size: 11px; color: var(--text-4); font-weight: 400; }
+.todo-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.todo-card { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--border-2); color: var(--text-1); cursor: pointer; transition: border-color .15s, transform .06s; }
+.todo-card:hover { border-color: var(--todo-color, var(--brand)); transform: translateY(-1px); }
+.todo-value { font-size: 18px; font-weight: 800; color: var(--todo-color, var(--brand)); }
+.todo-label { font-size: 12px; color: var(--text-2); }
+.todo-empty { justify-content: flex-start; cursor: default; }
+.approval-trace-step { padding: 8px 10px; border: 1px solid var(--border-2); border-radius: 6px; margin-top: 8px; background: var(--bg-2); }
+.approval-trace-step.is-error { border-color: var(--danger); }
+.approval-trace-step .trace-status { font-size: 11px; color: var(--text-3); margin-left: 6px; }
+.approval-trace-step .trace-output { font-size: 12px; color: var(--text-3); margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+.approval-batch-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 6px; margin-bottom: 10px; }
+.ap-select { display: inline-flex; align-items: center; margin-right: 4px; }
+.ap-select .check-box { width: 15px; height: 15px; }
+.cs-jump { margin-top: 6px; }
+.console-cancel { margin-left: 12px; }
+.tooltip-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border-strong); color: var(--text-3); font-size: 11px; cursor: help; margin-left: 6px; }
+.tooltip-wrap::after { content: attr(data-tooltip); position: absolute; left: 0; top: 24px; width: 220px; background: var(--bg-4); border: 1px solid var(--border-strong); color: var(--text-1); padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.5; opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity .15s, transform .15s; z-index: 20; }
+.tooltip-wrap:hover::after { opacity: 1; transform: translateY(0); }
+.onboard-card { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 12px 16px; margin-bottom: 14px; border: 1px solid rgba(99,131,241,.4); border-radius: 8px; background: linear-gradient(135deg, rgba(99,131,241,.10), rgba(168,85,247,.06)); }
+.onboard-close { position: absolute; top: 8px; right: 10px; background: none; border: none; color: var(--text-3); cursor: pointer; }
+.onboard-step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+.onboard-step strong { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 11px; }
+.toast-error { border-color: var(--danger); color: var(--danger); min-width: 260px; }
+.toast-close { margin-left: 10px; background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; }
+.demo-chip { display: inline-block; padding: 1px 5px; margin-right: 4px; border-radius: 4px; background: rgba(168,85,247,.14); color: #c084fc; font-size: 10px; font-weight: 700; vertical-align: middle; }
+.demo-clear-btn { margin: 12px; }
+.skeleton { position: relative; overflow: hidden; background: var(--bg-2); border-radius: 8px; }
+.skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent); animation: shimmer 1.4s infinite; }
+.skeleton-kpi { height: 92px; }
+.skeleton-card { height: 150px; }
+.skeleton-line { height: 42px; margin-bottom: 8px; }
+@keyframes shimmer { 100% { transform: translateX(100%); } }
 .ap-summary { font-size: 12px; color: var(--text-2); line-height: 1.5; margin-bottom: 6px; }
 .ap-meta { display: flex; gap: 14px; font-size: 11px; color: var(--text-3); flex-wrap: wrap; }
 .ap-risk { color: var(--warning); }

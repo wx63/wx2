@@ -116,6 +116,13 @@
 
       <!-- 视图：运营总览 -->
       <section class="view view-active" id="view-overview">
+        <div class="onboard-card" id="onboardCard" style="display:none">
+          <button class="onboard-close" id="onboardClose" aria-label="关闭引导">✕</button>
+          <div class="onboard-step"><strong>1</strong><span>在顶部指令栏下达任务，例如“生成竞品周报”</span></div>
+          <div class="onboard-step"><strong>2</strong><span>发帖 / 上架 / 下单等对外动作会进入审批中心，人工确认后才归档</span></div>
+          <div class="onboard-step"><strong>3</strong><span>执行结果在指令抽屉和近期产出报告中查看</span></div>
+        </div>
+        <div class="todo-row" id="todoRow"></div>
         <div class="kpi-row" id="kpiRow"></div>
 
         <!-- 指令控制台 -->
@@ -186,6 +193,11 @@
             <div class="ph-left"><span class="ph-dot"></span><h2>待审批</h2></div>
             <span class="hint">AI 只出方案，人工确认后归档；执行器接入前不真实执行</span>
           </div>
+          <div class="approval-batch-bar" id="approvalBatchBar" style="display:none">
+            <label class="checkbox"><input type="checkbox" id="approvalSelectAll" /><span class="check-box"></span><span>全选</span></label>
+            <button class="btn btn-sm btn-reject" id="approvalBatchReject">批量驳回</button>
+            <button class="btn btn-sm btn-primary" id="approvalBatchApprove">批量批准</button>
+          </div>
           <ul class="ap-list" id="approvalPending"></ul>
         </div>
         <div class="panel" style="margin-top:16px">
@@ -224,10 +236,10 @@
         <div class="kb-stats" id="orderStats"></div>
         <div class="panel">
           <div class="panel-head">
-            <div class="ph-left"><span class="ph-dot"></span><h2>本地订单</h2></div>
+            <div class="ph-left"><span class="ph-dot"></span><h2>本地订单</h2><span class="tooltip-wrap" data-tooltip="数据源：手动录入 · ERP 接入后自动同步">?</span></div>
             <div class="lead-toolbar">
               <input id="orderSearch" type="search" placeholder="搜索订单号/客户/商品" />
-              <select id="orderStatus"><option value="all">全部状态</option><option value="pending">待处理</option><option value="shipped">已发货</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select>
+          <select id="orderStatus"><option value="all">全部状态</option><option value="pending">待处理</option><option value="paid">已付款</option><option value="shipped">已发货</option><option value="delivered">已送达</option><option value="cancelled">已取消</option></select>
               <button class="btn btn-primary btn-sm" id="addOrderBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新增订单</button>
             </div>
           </div>

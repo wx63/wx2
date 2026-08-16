@@ -262,6 +262,7 @@ function buildConsoleStepsHtml() {
         <div class="cs-body">
           <div class="cs-label"><span class="cs-tag" style="color:${safeCssColor(s.color)}">${escapeHtml(s.tag)}</span> ${escapeHtml(s.label)}</div>
           <div class="cs-text cs-step-preview">${escapeHtml(preview)}</div>
+          ${s.clickable ? `<button class="btn btn-sm cs-jump" data-command-id="${escapeAttr(s.commandId)}">查看命令 #${escapeHtml(s.commandId)}</button>` : ""}
         </div>
         ${s.done ? '<span class="cs-check">✓</span>' : '<span class="cs-spinner"></span>'}
       </div>`;
@@ -299,6 +300,7 @@ function buildConsoleHtml() {
     <div class="console-layout">
       <aside class="console-steps-pane">
         <div class="console-pane-title"><span>执行轨迹</span><em>${consoleState.steps.length} 步</em></div>
+        ${consoleState.running ? `<button class="btn btn-sm btn-reject console-cancel" id="consoleCancel">取消执行</button>` : ""}
         <div class="console-steps-list">${buildConsoleStepsHtml()}</div>
       </aside>
       <section class="console-output-pane">
@@ -363,6 +365,29 @@ function renderConsole() {
   const html = buildConsoleHtml();
   getConsoleTargets().forEach((box) => {
     box.innerHTML = html;
+    box.querySelectorAll("[data-command-id]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.commandId;
+        switchView("overview");
+        const search = document.getElementById("runSearch");
+        if (search) {
+          search.value = id;
+          loadAgentRuns();
+        }
+      });
+    });
+    const cancelBtn = box.querySelector("#consoleCancel");
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => {
+        if (consoleState.abort && !consoleState.abort.signal.aborted) consoleState.abort.abort();
+        if (consoleState.currentCommandId) {
+          apiJson(`/api/commands/${consoleState.currentCommandId}/run`).then(r => {
+            if (r.data && r.data.id) apiJson(`/api/agent-runs/${r.data.id}/cancel`, { method: "POST" }).catch(() => {});
+          }).catch(() => {});
+        }
+        showToast("已提交取消，等待任务中断");
+      });
+    }
     const pane = box.querySelector(".console-output-pane");
     if (pane) pane.scrollTop = pane.scrollHeight;
   });
@@ -565,7 +590,7 @@ function renderAgentDetail(id) {
     updateOnlineCount();
     saveAgentStatus(a)
       .then(() => showToast(`「${escapeHtml(a.name)}」已${a.status === "offline" ? "下线" : "上线"}`))
-      .catch(e => { a.status = prev; renderAgentDetail(id); renderAgentGrid(); updateOnlineCount(); showToast(`状态保存失败：${e.message}`); });
+      .catch(e => { a.status = prev; renderAgentDetail(id); renderAgentGrid(); updateOnlineCount(); showToast(`状态保存失败：${e.message}`, "error"); });
   });
   detail.querySelectorAll(".skill-toggle").forEach((t) => {
     t.addEventListener("click", (e) => {
@@ -575,7 +600,7 @@ function renderAgentDetail(id) {
       renderAgentDetail(id);
       saveAgentSkill(a, i)
         .then(() => showToast(`技能「${a.skills[i].name}」已${a.skills[i].on ? "启用" : "停用"}`))
-        .catch(e => { a.skills[i].on = !a.skills[i].on; renderAgentDetail(id); showToast(`技能保存失败：${e.message}`); });
+        .catch(e => { a.skills[i].on = !a.skills[i].on; renderAgentDetail(id); showToast(`技能保存失败：${e.message}`, "error"); });
     });
   });
   detail.querySelectorAll(".tpl-card").forEach((c) => {
@@ -706,12 +731,24 @@ document.querySelectorAll(".nav-item").forEach((item) => {
 //  Toast
 // ================================================================
 let toastTimer;
-function showToast(msg) {
+function showToast(msg, level = "info") {
   const t = document.getElementById("toast");
+  if (!t) return;
   t.textContent = msg;
+  t.dataset.level = level;
   t.classList.add("show");
+  t.classList.toggle("toast-error", level === "error");
+  t.classList.toggle("toast-info", level !== "error");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
+  if (level === "error") {
+    const close = document.createElement("button");
+    close.className = "toast-close";
+    close.textContent = "✕";
+    close.onclick = () => t.classList.remove("show");
+    t.appendChild(close);
+  } else {
+    toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
+  }
 }
 
 // ================================================================
@@ -745,6 +782,7 @@ function renderFeed() {
   const feed = document.getElementById("activityFeed");
   feed.innerHTML = feedItems.map((f) => `
     <li style="--feed-color:${safeCssColor(f.color)}">
+      ${f.isDemo ? `<span class="demo-chip">示例</span>` : ""}
       <span class="feed-time">${escapeHtml(f.time)}</span>
       <span class="feed-tag">${escapeHtml(f.tag)}</span>
       <span class="feed-text">${escapeHtml(f.text)}</span>
@@ -818,10 +856,14 @@ function renderApprovalBadge() {
 function renderApprovals() {
   const pending = APPROVALS.filter(a => a.status === "pending");
   const history = APPROVALS.filter(a => a.status !== "pending");
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const isToday = (ts) => String(ts || "").slice(0, 10) === todayKey;
+  const todayApproved = APPROVALS.filter(a => a.status === "approved" && isToday(a.createdAt)).length;
+  const todayRejected = APPROVALS.filter(a => a.status === "rejected" && isToday(a.createdAt)).length;
   const stats = [
     { label: "待审批", value: pending.length, sub: "需人工确认", color: "var(--warning)" },
-    { label: "今日已批", value: APPROVALS.filter(a => a.status === "approved").length, sub: "草稿已归档", color: "var(--success)" },
-    { label: "今日已驳", value: APPROVALS.filter(a => a.status === "rejected").length, sub: "已退回修改", color: "var(--danger)" },
+    { label: "今日已批", value: todayApproved, sub: "草稿已归档", color: "var(--success)" },
+    { label: "今日已驳", value: todayRejected, sub: "已退回修改", color: "var(--danger)" },
     { label: "累计审批", value: APPROVALS.length, sub: "全部记录", color: "var(--brand)" },
   ];
   document.getElementById("approvalStats").innerHTML = stats.map(s => `
@@ -836,11 +878,13 @@ function renderApprovals() {
     const meta = APPROVAL_META[a.type] || APPROVAL_META.reply;
     return `
       <li class="ap-item" data-id="${escapeAttr(a.id)}">
+        ${a.status === "pending" ? `<label class="ap-select"><input type="checkbox" class="ap-check" data-id="${escapeAttr(a.id)}" /><span class="check-box"></span></label>` : ""}
         <div class="ap-icon" style="--file-color:${safeCssColor(meta.color)}">${escapeHtml(meta.icon)}</div>
         <div class="ap-main">
           <div class="ap-title">
             <span class="ap-type-chip" style="color:${safeCssColor(meta.color)};background:color-mix(in srgb,${safeCssColor(meta.color)} 14%,transparent)">${escapeHtml(meta.label)}</span>
             ${escapeHtml(a.title)}
+            ${a.needsReview ? `<span class="ap-review-chip" title="关键词命中置信度低，请重点核对">需复核</span>` : ""}
             <span class="ap-id">#${a.id}</span>
           </div>
           <div class="ap-summary">${escapeHtml(a.summary || a.command || "")}</div>
@@ -863,6 +907,49 @@ function renderApprovals() {
 
   document.getElementById("approvalPending").innerHTML = renderList(pending, "✅ 无待审批项，所有对外动作已处理");
   document.getElementById("approvalHistory").innerHTML = renderList(history, "暂无历史记录");
+
+  const batchBar = document.getElementById("approvalBatchBar");
+  if (batchBar) {
+    const hasPending = pending.length > 0;
+    batchBar.style.display = hasPending ? "flex" : "none";
+    if (hasPending) {
+      const selectAll = document.getElementById("approvalSelectAll");
+      const applyChecks = () => {
+        const checks = Array.from(document.querySelectorAll("#approvalPending .ap-check"));
+        selectAll.checked = checks.length > 0 && checks.every(c => c.checked);
+      };
+      if (selectAll) {
+        selectAll.onchange = () => {
+          document.querySelectorAll("#approvalPending .ap-check").forEach(c => c.checked = selectAll.checked);
+        };
+      }
+      document.querySelectorAll("#approvalPending .ap-check").forEach(c => c.addEventListener("change", applyChecks));
+      const selectedIds = () => Array.from(document.querySelectorAll("#approvalPending .ap-check:checked")).map(c => c.dataset.id);
+      const runBatch = async (decision) => {
+        const ids = selectedIds();
+        if (!ids.length) { showToast("请先选择审批条目"); return; }
+        if (!confirm(`确认批量${decision === "approve" ? "批准并归档" : "驳回"} ${ids.length} 条？`)) return;
+        const buttons = [document.getElementById("approvalBatchApprove"), document.getElementById("approvalBatchReject")];
+        buttons.forEach(b => b && (b.disabled = true));
+        try {
+          const data = await apiJson("/api/approvals/batch-decide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, decision }) });
+          const failed = data.failed || [];
+          if (failed.length) showToast(`批量处理完成：成功 ${data.processed.length}，失败 ${failed.length}`);
+          else showToast(`已批量${decision === "approve" ? "批准" : "驳回"} ${data.processed.length} 条`);
+          await loadApprovalsFromServer();
+          renderApprovals();
+        } catch (e) {
+          showToast(`批量处理失败：${e.message}`, "error");
+        } finally {
+          buttons.forEach(b => b && (b.disabled = false));
+        }
+      };
+      const approveBtn = document.getElementById("approvalBatchApprove");
+      const rejectBtn = document.getElementById("approvalBatchReject");
+      if (approveBtn) approveBtn.onclick = () => runBatch("approve");
+      if (rejectBtn) rejectBtn.onclick = () => runBatch("reject");
+    }
+  }
 
   // 绑定按钮
   document.querySelectorAll("#approvalPending [data-act]").forEach(btn => {
@@ -931,7 +1018,7 @@ async function decideApproval(ap, decision) {
     if (currentIdx >= 0) APPROVALS[currentIdx] = snapshot;
     renderApprovals();
     await loadApprovalsFromServer();
-    showToast(`⚠ 审批同步失败：${e.message}，已恢复服务器状态`);
+    showToast(`⚠ 审批同步失败：${e.message}，已恢复服务器状态`, "error");
   }
 }
 
@@ -952,7 +1039,7 @@ function openApprovalDraft(ap) {
     </div>
     <div class="task-modal-section">
       <div class="tms-label">来源 Agent 运行${ap.runId ? ` · Run #${ap.runId}` : ""}</div>
-      <div class="agent-step-meta">${ap.runId ? `该草稿由 Agent Run #${ap.runId} 生成` : "历史审批未关联 Agent 运行"}</div>
+      <div class="agent-step-meta" id="approvalRunTrace">${ap.runId ? `该草稿由 Agent Run #${ap.runId} 生成，正在加载执行轨迹…` : "历史审批未关联 Agent 运行"}</div>
     </div>
     <div class="task-modal-section">
       <div class="tms-label">AI 生成草稿（待人工复核）</div>
@@ -979,6 +1066,31 @@ function openApprovalDraft(ap) {
   document.getElementById("draftApprove").addEventListener("click", () => {
     closeModal(); decideApproval(ap, "approve");
   });
+  if (ap.runId) {
+    apiJson(`/api/agent-runs?search=${encodeURIComponent(ap.command || "")}&limit=20`)
+      .then(data => {
+        const items = (data.data && data.data.items) || [];
+        const run = items.find(r => r.id === Number(ap.runId)) || items[0];
+        if (!run) throw new Error("未找到运行记录");
+        const trace = document.getElementById("approvalRunTrace");
+        if (!trace) return;
+        if (!run.steps || !run.steps.length) {
+          trace.textContent = `Run #${run.id} · 无执行步骤`;
+          return;
+        }
+        trace.innerHTML = run.steps.map(s => `
+          <div class="approval-trace-step ${s.status === "error" ? "is-error" : ""}">
+            <strong>${escapeHtml(s.label || s.tool || s.kind || "步骤")}</strong>
+            <span class="trace-status">${escapeHtml(s.status || "")}</span>
+            <div class="trace-output">${escapeHtml(String(s.output || "").slice(0, 200))}</div>
+          </div>
+        `).join("");
+      })
+      .catch(() => {
+        const trace = document.getElementById("approvalRunTrace");
+        if (trace) trace.textContent = ap.runId ? `该草稿由 Agent Run #${ap.runId} 生成（执行轨迹加载失败）` : "历史审批未关联 Agent 运行";
+      });
+  }
 }
 
 // ================================================================
@@ -1017,7 +1129,7 @@ function renderLeads() {
           const g = GRADE_META[l.grade];
           return `
             <tr>
-              <td class="lead-id">${escapeHtml(l.id)}</td>
+              <td class="lead-id">${escapeHtml(l.id)}${l.isDemo ? ` <span class="demo-chip">示例</span>` : ""}</td>
               <td>${escapeHtml(l.channel)}</td>
               <td>${escapeHtml(l.name)}</td>
               <td>${escapeHtml(l.country)}</td>
@@ -1047,7 +1159,7 @@ function renderLeads() {
       const l = LEADS.find(x => x.id === btn.dataset.promote);
       apiJson(`/api/leads/${encodeURIComponent(l.id)}/promote`, { method: "POST" })
         .then(async () => { showToast(`已将「${l.name}」转入 CRM 待跟进`); pushFeed("客服", "#34d399", `线索 ${l.id}「${l.name}」转入 CRM 跟进池`); await refreshLeadsFromServer(); })
-        .catch(e => showToast(`转客户失败：${e.message}`));
+        .catch(e => showToast(`转客户失败：${e.message}`, "error"));
     };
   });
 }
@@ -1057,7 +1169,7 @@ async function refreshLeadsFromServer() {
     await loadDashboardData();
     renderLeads();
   } catch (e) {
-    showToast("刷新线索失败：" + e.message);
+    showToast("刷新线索失败：" + e.message, "error");
     throw e;
   }
 }
@@ -1086,7 +1198,7 @@ function addReport(r) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ agent: r.agent, title: r.title, tag: r.tag, color: r.color, content: r.content || "" }),
-  }).catch(e => showToast("报告保存失败：" + e.message));
+  }).catch(e => showToast("报告保存失败：" + e.message, "error"));
 }
 function renderReports() {
   const el = document.getElementById("reportList");
@@ -1178,7 +1290,7 @@ async function loadAgentRuns() {
     const data = await apiJson("/api/agent-runs?" + params.toString());
     RUNS = data.data || { items: [], total: 0 };
     renderAgentRuns();
-  } catch (e) { showToast("运行记录加载失败：" + e.message); }
+  } catch (e) { showToast("运行记录加载失败：" + e.message, "error"); }
 }
 async function handleRunAction(id, action) {
   if (action === "view") { const item = RUNS && RUNS.items ? RUNS.items.find(r => r.id === id) : RUNS.find(r => r.id === id); if (item) openAgentRunDetail(item); return; }
@@ -1187,7 +1299,7 @@ async function handleRunAction(id, action) {
     if (action === "rerun") { const data = await apiJson("/api/agent-runs/" + id + "/rerun", { method: "POST" }); showToast("已重新提交命令 #" + data.commandId); return; }
     showToast("操作成功");
     await loadAgentRuns();
-  } catch (e) { showToast("操作失败：" + e.message); }
+  } catch (e) { showToast("操作失败：" + e.message, "error"); }
 }
 
 function openAgentRunDetail(run) {
@@ -1240,7 +1352,7 @@ async function loadOrdersFromServer() {
     const data = await apiJson("/api/orders?" + params.toString());
     ORDERS = data.data || { items: [], total: 0 };
     renderOrders();
-  } catch (e) { showToast("订单加载失败：" + e.message); }
+  } catch (e) { showToast("订单加载失败：" + e.message, "error"); }
 }
 function renderOrders() {
   const statsEl = document.getElementById("orderStats");
@@ -1262,7 +1374,7 @@ function renderOrders() {
 function openOrderModal(order) {
   const overlay = document.getElementById("modalOverlay");
   const o = order || {};
-  document.getElementById("modalBody").innerHTML = `<div class="task-modal-hero" style="--agent-color:#60a5fa"><span class="detail-emoji">📦</span><div><div class="detail-name">${escapeHtml(order ? "编辑订单" : "新增订单")}</div><div class="detail-role">本地订单</div></div><button class="modal-close" id="modalClose">✕</button></div><div class="task-modal-section"><input id="orderFormOrderNo" placeholder="订单号" value="${escapeAttr(o.orderNo || "")}" /><input id="orderFormCustomer" placeholder="客户名称" value="${escapeAttr(o.customerName || "")}" /><input id="orderFormProduct" placeholder="商品" value="${escapeAttr(o.product || "")}" /><input id="orderFormQty" type="number" min="1" placeholder="数量" value="${escapeHtml(o.qty || 1)}" /><input id="orderFormAmount" type="number" step="0.01" placeholder="金额" value="${escapeHtml(o.amount || 0)}" /><input id="orderFormChannel" placeholder="渠道" value="${escapeAttr(o.channel || "")}" /><select id="orderFormStatus">${["pending","shipped","completed","cancelled"].map(s => `<option value="${s}" ${o.status === s ? "selected" : ""}>${s}</option>`).join("")}</select><input id="orderFormTracking" placeholder="物流单号" value="${escapeAttr(o.trackingNo || "")}" /></div><div class="task-modal-foot"><button class="btn" id="orderCancel">取消</button><button class="btn btn-primary" id="orderSave">保存</button></div>`;
+  document.getElementById("modalBody").innerHTML = `<div class="task-modal-hero" style="--agent-color:#60a5fa"><span class="detail-emoji">📦</span><div><div class="detail-name">${escapeHtml(order ? "编辑订单" : "新增订单")}</div><div class="detail-role">本地订单</div></div><button class="modal-close" id="modalClose">✕</button></div><div class="task-modal-section"><input id="orderFormOrderNo" placeholder="订单号" value="${escapeAttr(o.orderNo || "")}" /><input id="orderFormCustomer" placeholder="客户名称" value="${escapeAttr(o.customerName || "")}" /><input id="orderFormProduct" placeholder="商品" value="${escapeAttr(o.product || "")}" /><input id="orderFormQty" type="number" min="1" placeholder="数量" value="${escapeHtml(o.qty || 1)}" /><input id="orderFormAmount" type="number" step="0.01" placeholder="金额" value="${escapeHtml(o.amount || 0)}" /><input id="orderFormChannel" placeholder="渠道" value="${escapeAttr(o.channel || "")}" /><select id="orderFormStatus">${["pending","paid","shipped","delivered","cancelled"].map(s => `<option value="${s}" ${o.status === s ? "selected" : ""}>${escapeHtml(ORDER_STATUS_LABEL[s] || s)}</option>`).join("")}</select><input id="orderFormTracking" placeholder="物流单号" value="${escapeAttr(o.trackingNo || "")}" /></div><div class="task-modal-foot"><button class="btn" id="orderCancel">取消</button><button class="btn btn-primary" id="orderSave">保存</button></div>`;
   overlay.classList.add("show");
   document.getElementById("modalClose").onclick = closeModal;
   const cancelBtn = document.getElementById("orderCancel");
@@ -1370,7 +1482,7 @@ async function uploadKBFiles(pending) {
     pending.forEach(d => { d.status = "failed"; });
     renderKBList();
     initKnowledge();
-    showToast(`❌ 上传失败：${e.message}`);
+    showToast(`❌ 上传失败：${e.message}`, "error");
   }
 }
 
@@ -1385,7 +1497,7 @@ function renderKBList() {
         <span class="kb-status-chip kb-status-processing">${KB_STATUS.uploading || KB_STATUS.processing}</span>
       `;
     } else if (d.status === "not_indexed") {
-      right = `<span class="kb-status-chip kb-status-failed">${KB_STATUS.not_indexed}</span>`;
+      right = `<span class="kb-status-chip kb-status-failed" title="PDF/DOCX/XLSX 仅存档，客服检索不到；请使用 MD/TXT">${KB_STATUS.not_indexed}</span>`;
     } else if (d.status === "ready") {
       right = `<span class="kb-status-chip kb-status-ready">${KB_STATUS.ready}</span>`;
     } else {
@@ -1428,7 +1540,7 @@ function renderKBList() {
         KB_DOCS.splice(i, 0, removed); // 恢复
         renderKBList();
         initKnowledge();
-        showToast(`❌ 删除失败：${e.message}`);
+        showToast(`❌ 删除失败：${e.message}`, "error");
       }
     });
   });
@@ -1477,7 +1589,7 @@ async function loadKBFilesFromServer() {
     initKnowledge();
     return KB_DOCS;
   } catch (e) {
-    showToast(`⚠ 知识库文件列表拉取失败：${e.message}`);
+    showToast(`⚠ 知识库文件列表拉取失败：${e.message}`, "error");
     return [];
   }
 }
@@ -1629,6 +1741,25 @@ function initSettings() {
       }
     });
   });
+
+  const clearDemo = document.createElement("button");
+  clearDemo.className = "settings-btn demo-clear-btn";
+  clearDemo.textContent = "清空示例数据";
+  clearDemo.onclick = async () => {
+    if (!confirm("确认清空示例数据？真实数据不会被删除。")) return;
+    try {
+      const data = await apiJson("/api/demo/clear", { method: "POST" });
+      showToast(`已清空示例：活动 ${data.data.activity}，线索 ${data.data.leads}，KPI ${data.data.kpis}`);
+      await loadDashboardData();
+      renderKPI();
+      renderFeed();
+      renderLeads();
+    } catch (e) {
+      showToast(`清空示例失败：${e.message}`, "error");
+    }
+  };
+  const grid = document.getElementById("settingsGrid");
+  grid.appendChild(clearDemo);
 }
 
 // ================================================================
@@ -1695,7 +1826,7 @@ async function loadHealthStatus(showResult = false) {
       chip.title = `后端自检失败：${e.message}`;
     }
     if (document.getElementById("settingsGrid")) initSettings();
-    if (showResult) showToast(`❌ 后端自检失败：${e.message}`);
+    if (showResult) showToast(`❌ 后端自检失败：${e.message}`, "error");
   }
 }
 
@@ -1710,9 +1841,33 @@ async function loadDashboardData() {
   settingsState = d.settings || {};
   feedItems.length = 0;
   feedItems.push(...(d.activity || []));
+  renderTodoSummary(d.todo || {});
 }
 
-async function readCommandStream(resp, onDelta, onStatus) {
+function renderTodoSummary(todo = {}) {
+  const el = document.getElementById("todoRow");
+  if (!el) return;
+  const items = [
+    { label: "待审批", value: todo.pendingApprovals || 0, view: "approval", color: "#fbbf24" },
+    { label: "新线索", value: todo.newLeads || 0, view: "leads", color: "#fb7185" },
+    { label: "异常订单", value: todo.abnormalOrders || 0, view: "orders", color: "#60a5fa" },
+    { label: "运行中", value: todo.runningRuns || 0, view: "overview", color: "#34d399" },
+  ];
+  const total = items.reduce((s, i) => s + i.value, 0);
+  el.innerHTML = total === 0
+    ? `<div class="todo-card todo-empty"><span>✅ 全部处理完毕</span></div>`
+    : items.map(i => `
+      <button class="todo-card" data-todo-view="${escapeAttr(i.view)}" style="--todo-color:${safeCssColor(i.color)}">
+        <span class="todo-value">${escapeHtml(i.value)}</span>
+        <span class="todo-label">${escapeHtml(i.label)}</span>
+      </button>
+    `).join("");
+  el.querySelectorAll("[data-todo-view]").forEach(btn => {
+    btn.addEventListener("click", () => switchView(btn.dataset.todoView));
+  });
+}
+
+async function readCommandStream(resp, onDelta, onStatus, signal) {
   return new Promise((resolve, reject) => {
     let buffer = "";
     let currentEvent = "";
@@ -1744,6 +1899,8 @@ async function readCommandStream(resp, onDelta, onStatus) {
 
     const decoder = new TextDecoder("utf-8");
     const reader = resp.body.getReader();
+    const onAbort = () => { try { reader.cancel(); } catch (_) {} reject(new Error("已取消")); };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
     const pump = async () => {
       while (true) {
         const { done, value } = await reader.read();
@@ -1772,14 +1929,17 @@ async function readCommandStream(resp, onDelta, onStatus) {
 
 /** 调后端提交异步指令并解析流式结果，返回兼容旧调用的 {content, approval, needsApproval} */
 async function callBackend(command, onStatus, onDelta) {
+  const ctrl = new AbortController();
+  consoleState.abort = ctrl;
   const resp = await fetch(`${API_BASE}/api/command`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: ctrl.signal,
     body: JSON.stringify({ command, agentId: "main", sessionId: "ecommerce-console", stream: true }),
   });
   const contentType = String(resp.headers.get("content-type") || "");
   if (resp.ok && contentType.includes("text/event-stream")) {
-    return readCommandStream(resp, onDelta, onStatus);
+    return readCommandStream(resp, onDelta, onStatus, ctrl.signal);
   }
 
   const data = await resp.json().catch(() => ({}));
@@ -1787,11 +1947,14 @@ async function callBackend(command, onStatus, onDelta) {
   const submitted = data;
   const commandId = submitted.commandId;
   if (!commandId) throw new Error("后端未返回 commandId");
+  consoleState.currentCommandId = commandId;
 
   const startedAt = Date.now();
   const timeoutMs = 120000;
+  try {
   while (Date.now() - startedAt < timeoutMs) {
     await delay(1500);
+    if (ctrl.signal.aborted) throw new Error("已取消");
     const polled = await apiJson(`/api/commands/${encodeURIComponent(commandId)}`);
     const job = polled.data || {};
     if (typeof onStatus === "function") onStatus(job);
@@ -1801,6 +1964,10 @@ async function callBackend(command, onStatus, onDelta) {
     if (job.status === "error") throw new Error(job.error || "执行失败");
   }
   throw new Error(`后台仍在处理中，请稍后查看命令 #${commandId}`);
+  } finally {
+    consoleState.currentCommandId = null;
+    consoleState.abort = null;
+  }
 }
 
 /** 把后端审批条目规范化为前端展示对象 */
@@ -1819,6 +1986,9 @@ function normalizeApproval(ap) {
     created: ap.created || (ap.createdAt
       ? new Date(ap.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
       : "--:--"),
+    createdAt: ap.createdAt || ap.created || null,
+    needsReview: !!ap.needsReview,
+    confidence: ap.confidence || null,
     status: ap.status || "pending",
     draft: ap.draft || "（无草稿）",
     command: ap.command || "",
@@ -1854,7 +2024,7 @@ async function loadApprovalsFromServer() {
     if (currentView === "approval") renderApprovals();
     return APPROVALS;
   } catch (e) {
-    showToast(`⚠ 审批数据拉取失败：${e.message}`);
+    showToast(`⚠ 审批数据拉取失败：${e.message}`, "error");
     return [];
   }
 }
@@ -1959,10 +2129,18 @@ async function runCommand(cmd, opts = {}) {
       push('\u4EA7\u51FA', result.content, '\u7ED3\u679C', true);
     }
     addReport({ agent: agentIdx, title: cmd.slice(0, 24) + (cmd.length > 24 ? '\u2026' : ''), tag, color, content: result.content });
-    try { await loadDashboardData(); renderAgentRuns(); } catch (e) { showToast("刷新数据失败：" + e.message); }
+    try { await loadDashboardData(); renderAgentRuns(); } catch (e) { showToast("刷新数据失败：" + e.message, "error"); }
   } catch (e) {
     push('\u9519\u8BEF', `\u6267\u884C\u5931\u8D25\uFF1A${e.message}`, '\u9519\u8BEF', true);
-    showToast(`\u6267\u884C\u5931\u8D25\uFF1A${e.message}`);
+    showToast(`\u6267\u884C\u5931\u8D25\uFF1A${e.message}`, "error");
+    const idMatch = String(e.message || "").match(/#(\d+)/);
+    if (idMatch) {
+      const commandId = idMatch[1];
+      push("查看命令", `#${commandId}`, "结果", true);
+      const last = consoleState.steps[consoleState.steps.length - 1];
+      last.clickable = true;
+      last.commandId = Number(commandId);
+    }
     if (e.message.includes('\u540E\u7AEF') || e.message.includes('fetch')) {
       push('\u964D\u7EA7', '\u540E\u7AEF\u4E0D\u53EF\u7528\uFF0C\u8BF7\u786E\u8BA4 server \u670D\u52A1\u5DF2\u542F\u52A8 (node server/index.js)', '\u8B66\u544A', true);
     }
@@ -2020,7 +2198,7 @@ async function runKbQuery(question) {
     showToast("✅ 知识库检索完成，已生成带来源引用的答复草稿");
   } catch (e) {
     push("错误", `检索失败：${e.message}`, "错误", true);
-    showToast(`❌ kb-query 失败：${e.message}`);
+    showToast(`❌ kb-query 失败：${e.message}`, "error");
   } finally {
     consoleState.running = false;
     renderConsole();
@@ -2031,12 +2209,14 @@ async function runKbQuery(question) {
 //  初始化
 // ================================================================
 async function bootstrap() {
+  renderSkeleton();
   const user = await loadUser();
   if (!user) return;
   await loadRulesFromServer();
   await loadHealthStatus();
   try { await loadDashboardData(); }
-  catch (e) { showToast(`⚠ 仪表盘数据加载失败：${e.message}`); }
+  catch (e) { showToast(`⚠ 仪表盘数据加载失败：${e.message}`, "error"); }
+  renderOnboarding();
   renderKPI();
   renderAgentGrid();
   renderFeed();
@@ -2055,6 +2235,27 @@ async function bootstrap() {
   await loadApprovalsFromServer();
   await loadKBFilesFromServer();
   startRealtimeEvents();
+}
+
+function renderSkeleton() {
+  const kpi = document.getElementById("kpiRow");
+  const grid = document.getElementById("agentGrid");
+  const feed = document.getElementById("activityFeed");
+  if (kpi) kpi.innerHTML = Array.from({ length: 4 }, () => `<div class="skeleton skeleton-kpi"></div>`).join("");
+  if (grid) grid.innerHTML = Array.from({ length: 5 }, () => `<div class="skeleton skeleton-card"></div>`).join("");
+  if (feed) feed.innerHTML = Array.from({ length: 5 }, () => `<li class="skeleton skeleton-line"></li>`).join("");
+}
+
+function renderOnboarding() {
+  const card = document.getElementById("onboardCard");
+  if (!card) return;
+  const flag = "oc_onboard_seen_v1";
+  if (localStorage.getItem(flag)) return;
+  card.style.display = "flex";
+  document.getElementById("onboardClose").onclick = () => {
+    card.style.display = "none";
+    localStorage.setItem(flag, "1");
+  };
 }
 bootstrap();
 // 每 30s 轮询一次审批数据，保证多端同步 & 徽标新鲜
