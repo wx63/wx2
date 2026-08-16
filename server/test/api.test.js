@@ -99,6 +99,19 @@ test('login and session cookie', async () => {
   assert.equal((await me.json()).user.email, 'admin@example.com');
 });
 
+test('remember me extends session cookie max age', async () => {
+  const f = cookieFetch(ctx.base);
+  const resp = await f('/api/auth/login', jsonReq('POST', { email: 'admin@example.com', password: 'password123', remember: true }));
+  assert.equal(resp.status, 200);
+  const setCookie = resp.headers.get('set-cookie') || '';
+  const expires = setCookie.match(/Expires=([^;]+)/i)?.[1];
+  assert.ok(expires, 'remember 登录应返回 Expires');
+  const expiresMs = Date.parse(expires);
+  const min = Date.now() + 29 * 24 * 60 * 60 * 1000;
+  const max = Date.now() + 31 * 24 * 60 * 60 * 1000;
+  assert.ok(expiresMs >= min && expiresMs <= max, `remember 会话应约 30 天，实际 ${new Date(expiresMs).toISOString()}`);
+});
+
 test('password reset endpoint changes password with valid token', async () => {
   const email = 'reset-flow@example.com';
   dbmod.createUser({ email, name: 'Reset Flow', passwordHash: bcrypt.hashSync('old-password-123', 12), role: 'operator' });
@@ -220,6 +233,35 @@ test('approval lifecycle and execute is archive-only', async () => {
   assert.equal(exec.status, 200);
   const execBody = await exec.json();
   assert.equal(execBody.executed, false);
+});
+
+test('approval batch decide processes pending and reports failed ids', async () => {
+  const admin = await loginAs('admin@example.com');
+  const a = dbmod.createApproval({ title: '批量审批 A', command: '发帖 A', action: 'social_post', draft: 'draft', risk: 'risk', createdBy: 1 });
+  const b = dbmod.createApproval({ title: '批量审批 B', command: '发帖 B', action: 'social_post', draft: 'draft', risk: 'risk', createdBy: 1 });
+  const done = dbmod.createApproval({ title: '已处理 B', command: '发帖 C', action: 'social_post', draft: 'draft', risk: 'risk', createdBy: 1 });
+  dbmod.decideApproval({ id: done.id, decision: 'approve', userId: 1 });
+
+  const resp = await admin('/api/approvals/batch-decide', jsonReq('POST', { ids: [a.id, b.id, done.id, 'AP-MISSING'], decision: 'approve' }));
+  assert.equal(resp.status, 200);
+  const body = await resp.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.processed.length, 2);
+  assert.equal(body.failed.length, 2);
+  assert.equal(dbmod.getApproval(a.id).status, 'approved');
+  assert.equal(dbmod.getApproval(b.id).status, 'approved');
+});
+
+test('demo clear endpoint removes only demo rows', async () => {
+  const admin = await loginAs('admin@example.com');
+  const before = dbmod.listActivity(100);
+  const resp = await admin('/api/demo/clear', { method: 'POST' });
+  assert.equal(resp.status, 200);
+  const body = await resp.json();
+  assert.equal(body.ok, true);
+  assert.equal(typeof body.data.activity, 'number');
+  const after = dbmod.listActivity(100);
+  assert.ok(after.length <= before.length);
 });
 
 test('kb query unmatched path is deterministic', async () => {

@@ -187,7 +187,7 @@ function createAuthRouter({ allowPublicRegister, defaultRegisterRole = 'viewer' 
   });
 
   router.post('/api/auth/login', loginLimiter, async (req, res) => {
-    const { email, password } = req.body || {};
+    const { email, password, remember } = req.body || {};
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const lockKey = `${req.ip}:${normalizedEmail}`;
     if (isLoginLocked(lockKey)) {
@@ -217,6 +217,9 @@ function createAuthRouter({ allowPublicRegister, defaultRegisterRole = 'viewer' 
     clearLoginFailures(lockKey);
     loginSession(req, user, err => {
       if (err) return res.status(500).json({ ok: false, error: '登录失败，请稍后重试' });
+      if (remember === true || remember === 'true') {
+        req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
+      }
       updateLastLogin(user.id);
       req.user = toSafeUser(findUserById(user.id));
       audit(req, 'login', 'user', String(user.id));

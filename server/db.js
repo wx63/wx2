@@ -305,7 +305,10 @@ addColumnIfMissing('commands', 'finished_at', 'TEXT');
 addColumnIfMissing('commands', 'run_id', 'INTEGER');
 addColumnIfMissing('approvals', 'run_id', 'INTEGER');
 addColumnIfMissing('approvals', 'confidence', 'TEXT');
-addColumnIfMissing('approvals', 'needs_review', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('approvals', 'needs_review', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('activity_feed', 'is_demo', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('leads', 'is_demo', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('kpis', 'is_demo', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('agent_steps', 'meta_json', 'TEXT');
 addColumnIfMissing('agent_runs', 'summary', 'TEXT');
 addColumnIfMissing('agent_runs', 'context_json', 'TEXT');
@@ -377,14 +380,14 @@ function seedDefaults() {
 
   const feedCount = Number(db.prepare('SELECT COUNT(*) AS n FROM activity_feed').get().n);
   if (!feedCount) {
-    const stmt = db.prepare('INSERT INTO activity_feed (tag, color, text) VALUES (@tag, @color, @text)');
+    const stmt = db.prepare('INSERT INTO activity_feed (tag, color, text, is_demo) VALUES (@tag, @color, @text, 1)');
     DEFAULT_FEED.forEach(f => stmt.run(f));
   }
 
   const leadCount = Number(db.prepare('SELECT COUNT(*) AS n FROM leads').get().n);
   if (!leadCount) {
-    const stmt = db.prepare(`INSERT INTO leads (id, channel, name, country, msg, grade, intent, score, time)
-      VALUES (@id, @channel, @name, @country, @msg, @grade, @intent, @score, @time)`);
+    const stmt = db.prepare(`INSERT INTO leads (id, channel, name, country, msg, grade, intent, score, time, is_demo)
+      VALUES (@id, @channel, @name, @country, @msg, @grade, @intent, @score, @time, 1)`);
     DEFAULT_LEADS.forEach(l => stmt.run(l));
   }
 }
@@ -962,6 +965,7 @@ function listKpis() {
     icon: row.icon,
     color: row.color,
     spark: safeJsonParse(row.spark_json, []),
+    isDemo: !!row.is_demo,
   }));
 
   const leadCount = Number(db.prepare("SELECT COUNT(*) AS n FROM leads WHERE status = 'new'").get().n);
@@ -1020,6 +1024,7 @@ function listActivity(limit = 30) {
     text: row.text,
     time: row.created_at ? new Date(row.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '',
     createdAt: row.created_at,
+    isDemo: !!row.is_demo,
   }));
 }
 
@@ -1044,7 +1049,7 @@ function listLeads(grade = 'all', { role = 'admin' } = {}) {
   const rows = grade && grade !== 'all'
     ? db.prepare('SELECT * FROM leads WHERE grade = ? ORDER BY created_at DESC').all(grade)
     : db.prepare('SELECT * FROM leads ORDER BY created_at DESC').all();
-  return rows.map(row => ({ id: row.id, channel: row.channel, name: row.name, country: row.country, msg: row.msg, grade: row.grade, intent: row.intent, score: row.score, time: row.time, status: row.status, promotedAt: row.promoted_at }));
+  return rows.map(row => ({ id: row.id, channel: row.channel, name: row.name, country: row.country, msg: row.msg, grade: row.grade, intent: row.intent, score: row.score, time: row.time, status: row.status, promotedAt: row.promoted_at, isDemo: !!row.is_demo }));
 }
 
 function promoteLead(id, userId) {
@@ -1239,7 +1244,26 @@ function getDashboard(userId, role = 'admin') {
     reports: listReports(20),
     runs: role === 'admin' ? listAgentRuns({ limit: 10 }).items : listAgentRuns({ limit: 10, userId, role }).items,
     settings: getSettings(userId),
+    todo: getTodoSummary(userId, role),
   };
+}
+
+function getTodoSummary(userId, role = 'admin') {
+  const pendingApprovals = Number(db.prepare("SELECT COUNT(*) AS n FROM approvals WHERE status = 'pending'").get().n);
+  const newLeads = Number(db.prepare("SELECT COUNT(*) AS n FROM leads WHERE status = 'new'").get().n);
+  const abnormalOrders = Number(db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'").get().n);
+  let runningRuns = Number(db.prepare("SELECT COUNT(*) AS n FROM agent_runs WHERE status = 'running'").get().n);
+  if (role && role !== 'admin') {
+    runningRuns = Number(db.prepare("SELECT COUNT(*) AS n FROM agent_runs WHERE status = 'running' AND (user_id = ? OR user_id IS NULL)").get(userId).n);
+  }
+  return { pendingApprovals, newLeads, abnormalOrders, runningRuns };
+}
+
+function clearDemoData() {
+  const activity = db.prepare("DELETE FROM activity_feed WHERE is_demo = 1").run().changes || 0;
+  const leads = db.prepare("DELETE FROM leads WHERE is_demo = 1").run().changes || 0;
+  const kpis = db.prepare("DELETE FROM kpis WHERE is_demo = 1").run().changes || 0;
+  return { activity, leads, kpis };
 }
 
 module.exports = {
@@ -1292,6 +1316,7 @@ module.exports = {
   getSettings,
   setSetting,
   getDashboard,
+  clearDemoData,
   createAgentRun,
   markAgentRunRunning,
   appendAgentStep,

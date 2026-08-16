@@ -14,6 +14,7 @@ const {
   getSettings,
   setSetting,
   addActivity,
+  clearDemoData,
 } = require('../db');
 const { requireRole, isStringField, rejectInvalid, audit } = require('../middleware');
 const events = require('../events');
@@ -141,6 +142,12 @@ router.patch('/api/settings', requireRole('operator', 'admin'), (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
+});
+
+router.post('/api/demo/clear', requireRole('admin'), (req, res) => {
+  const result = clearDemoData();
+  audit(req, 'clear_demo_data', 'system', null, result);
+  res.json({ ok: true, data: result });
 });
 
 module.exports = router;
