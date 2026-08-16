@@ -16,6 +16,7 @@
 ## 1. 本次目标
 
 - 服务器：`http://106.55.18.244:3001`
+- 服务器实际目录：`/opt/ecommerce-agent`（不是 `~/app`）
 - 更新内容：最新前后端代码，重点修复未登录访问根路径不跳转登录页的问题。
 - 更新包：`E:\基于OpenClaw构建跨境电商智能体\基于OpenClaw构建跨境电商智能体\deploy\ecommerce-agent-update-latest.zip`
 - 更新包已验证：不含 `data/`，不含 `.env`，包含最新 `public/app.js` 和 `server/index.js`。
@@ -30,7 +31,7 @@ curl -s http://127.0.0.1:3001/app.js | grep -c "redirectToLogin" || true
 ```
 
 如果 `redirectToLogin` 数量是 `0`，说明远程确实落后，需要执行下面的更新。
-如果 `pm2 describe` 显示的目录不是 `~/app`，把后面的 `APP_DIR` 换成实际目录。
+如果 `pm2 describe` 显示的目录不是 `/opt/ecommerce-agent`，把后面的 `APP_DIR` 换成实际目录。
 
 ## 3. 方式 A：本机 OpenClaw 有 SSH 权限（推荐）
 
@@ -48,7 +49,7 @@ ssh "${serverUser}@${serverIp}"
 进入服务器后执行：
 
 ```bash
-APP_DIR="$HOME/app"
+APP_DIR="/opt/ecommerce-agent"
 mkdir -p "$APP_DIR"
 unzip -o "$HOME/ecommerce-agent-update-latest.zip" -d "$APP_DIR"
 cd "$APP_DIR/server"
@@ -110,6 +111,7 @@ Invoke-WebRequest -Uri 'http://106.55.18.244:3001/app.js' -UseBasicParsing | Sel
 - 不执行数据库迁移（本次 SQLite 结构未变）
 - 不打印服务器密钥、管理员密码、DeepSeek API Key
 - 不修改远程 `ALLOW_REGISTER`；公网保持 `false`
+- HTTP 直连部署不要启用 CSP `upgrade-insecure-requests`，否则浏览器会把同源 API 请求升级成 HTTPS 导致登录检查失败。
 
 ## 7. 回滚
 
