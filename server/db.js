@@ -4,6 +4,7 @@
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
+const events = require('./events');
 
 const DATA_DIR = process.env.OPENCLAW_DATA_DIR || path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -778,7 +779,9 @@ function createApproval({ title, command, action, draft, risk, createdBy, runId,
     confidence: confidence || null,
     needsReview: needsReview ? 1 : 0,
   });
-  return getApproval(id);
+  const approval = getApproval(id);
+  events.publish('approval', approval);
+  return approval;
 }
 function approvalRow(row) {
   if (!row) return null;
@@ -824,7 +827,9 @@ function decideApproval({ id, decision, userId }) {
   const status = decision === 'approve' ? 'approved' : 'rejected';
   const ts = nowIso();
   db.prepare(`UPDATE approvals SET status = @status, decided_by = @userId, decided_at = @ts WHERE id = @id`).run({ id, status, userId: userId || null, ts });
-  return getApproval(id);
+  const approval = getApproval(id);
+  events.publish('approval', approval);
+  return approval;
 }
 
 function migrateApprovalsFromJson(filePath) {
@@ -972,6 +977,13 @@ function addActivity({ tag, color, text, userId }) {
     color: color || '#6366f1',
     text: String(text || '').slice(0, 1000),
     userId: userId || null,
+  });
+  events.publish('activity', {
+    tag: String(tag || '系统').slice(0, 40),
+    color: color || '#6366f1',
+    text: String(text || '').slice(0, 1000),
+    time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    createdAt: new Date().toISOString(),
   });
 }
 

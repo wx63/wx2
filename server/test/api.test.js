@@ -33,6 +33,7 @@ fs.writeFileSync(path.join(process.env.OPENCLAW_KB_DIR, '退换货政策.md'), '
 const app = require('../index');
 const dbmod = require('../db');
 const bridge = require('../bridge');
+const scheduler = require('../scheduler');
 const bcrypt = require('bcryptjs');
 
 function makeServer() {
@@ -553,4 +554,50 @@ test('approval persistence includes confidence and needs review', () => {
   const ap = dbmod.createApproval({ title: '低置信审批', command: '补货', action: 'purchase', draft: '草稿', risk: '测试', createdBy: 1, confidence: 'low', needsReview: true });
   assert.equal(ap.confidence, 'low');
   assert.equal(ap.needsReview, true);
+});
+
+test('approval executor registry exposes adapters and remains archive-only', async () => {
+  const admin = await loginAs('admin@example.com');
+  const ap = dbmod.createApproval({ title: '执行器注册测试', command: '发帖', action: 'social_post', draft: '草稿', risk: '测试', createdBy: 1 });
+  const decided = await admin(`/api/approvals/${encodeURIComponent(ap.id)}/decide`, jsonReq('POST', { decision: 'approve' }));
+  assert.equal(decided.status, 200);
+  const exec = await admin(`/api/approvals/${encodeURIComponent(ap.id)}/execute`, { method: 'POST' });
+  assert.equal(exec.status, 200);
+  const body = await exec.json();
+  assert.equal(body.executed, false);
+  assert.ok(body.adapters.length >= 4);
+  assert.ok(body.adapters.some(a => a.name === 'instagram' && a.configured === false));
+});
+
+test('scheduler computes exact next run without minute drift', () => {
+  const onTime = new Date(2026, 7, 16, 9, 0, 0);
+  assert.equal(scheduler.msUntilMinute(9 * 60, onTime), 0);
+  const lateStart = new Date(2026, 7, 16, 9, 0, 30);
+  assert.equal(scheduler.msUntilMinute(9 * 60, lateStart), 0);
+  const afterWindow = new Date(2026, 7, 16, 9, 3, 0);
+  assert.ok(scheduler.msUntilMinute(9 * 60, afterWindow) > 0);
+  const nextDayTarget = new Date(2026, 7, 17, 9, 0, 0);
+  assert.equal(scheduler.msUntilMinute(9 * 60, afterWindow), nextDayTarget.getTime() - afterWindow.getTime());
+});
+
+test('SSE events stream requires auth and emits hello', async () => {
+  const anon = await fetch(ctx.base + '/api/events');
+  assert.equal(anon.status, 401);
+  const admin = await loginAs('admin@example.com');
+  const resp = await admin('/api/events');
+  assert.equal(resp.status, 200);
+  assert.match(String(resp.headers.get('content-type')), /text\/event-stream/);
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let text = '';
+  let sawHello = false;
+  const deadline = Date.now() + 4000;
+  while (Date.now() < deadline && !sawHello) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    sawHello = text.includes('event: hello');
+  }
+  await reader.cancel();
+  assert.equal(sawHello, true);
 });
