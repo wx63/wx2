@@ -1,11 +1,13 @@
 // executors/index.js — 审批执行器适配器注册表
-// 当前所有平台均未接入官方 API：只保留统一接口和审计占位，不真实执行对外动作。
+// 已接入：email（SMTP 发件）、telegram（Bot API）；其余平台待接入官方 API。
+const email = require('./email');
+const telegram = require('./telegram');
 const instagram = require('./instagram');
 const x = require('./x');
 const wechat = require('./wechat');
 const erp = require('./erp');
 
-const adapters = [instagram, x, wechat, erp];
+const adapters = [email, telegram, instagram, x, wechat, erp];
 
 function findAdapter(approval) {
   return adapters.find(a => typeof a.matches === 'function' && a.matches(approval)) || null;
