@@ -80,6 +80,7 @@ skills/           # 自定义技能（SKILL.md）
 |------|------|------|
 | PORT | 3001 | 后端端口 |
 | SESSION_SECRET | replace-me | 会话签名密钥；生产环境必须改 |
+| SESSION_COOKIE_SECURE | auto | `auto` 根据 HTTP/HTTPS 自动设置；`true` 强制 Secure；`false` 允许 HTTP Cookie |
 | CORS_ORIGIN | 空 | 为空时不启用 CORS；如需跨域只填精确白名单 |
 | ALLOW_REGISTER | development true / production false | 是否允许公开注册；新账号固定为 viewer 只读权限 |
 | ADMIN_EMAIL / ADMIN_PASSWORD | 空 | 数据库无用户时自动创建首个 admin；未开启注册且空库未配置则无法登录 |
@@ -125,6 +126,7 @@ A: 在服务关闭或重启前分别轮换以下配置：
 - DeepSeek：在 DeepSeek 开放平台生成新 API Key，更新 `.env` 的 `OPENCLAW_PROVIDER_API_KEY`（或 `DEEPSEEK_API_KEY`），重启服务。
 - 飞书：在飞书开放平台重置 `App Secret`，更新 `.env` 的 `FEISHU_APP_SECRET`，重启服务。
 - 会话：生成新的强随机 `SESSION_SECRET`，更新 `.env` 后重启；重启后现有登录会话会失效。
+- 若通过 `http://IP:3001` 访问但无法保持登录，确认 `.env` 为 `SESSION_COOKIE_SECURE=auto` 或 `false`，然后重启服务。
 - 管理员：新库首次启动由 `ADMIN_PASSWORD` 初始化；已有账号如需重置，应在数据库中安全更新 `password_hash`，不要只在 `.env` 改 `ADMIN_PASSWORD`。
 
 ## 工作约定
