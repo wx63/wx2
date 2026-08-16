@@ -83,6 +83,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3001);
 const isProduction = process.env.NODE_ENV === 'production';
 const allowPublicRegister = process.env.ALLOW_REGISTER === 'true' || (process.env.NODE_ENV !== 'production' && process.env.ALLOW_REGISTER !== 'false');
+const defaultRegisterRole = String(process.env.DEFAULT_REGISTER_ROLE || 'viewer').toLowerCase();
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const SESSION_SECRET = process.env.SESSION_SECRET || (isProduction ? '' : 'dev-only-change-me');
 const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === 'true' ? true : process.env.SESSION_COOKIE_SECURE === 'false' ? false : 'auto';
@@ -308,7 +309,7 @@ bootstrapAdminFromEnv();
 app.use(attachUser);
 app.use(createRequestLogger({ logAudit }));
 app.use(sameOriginWriteGuard);
-app.use(createApiRouter({ allowPublicRegister, enqueueCommand }));
+app.use(createApiRouter({ allowPublicRegister, defaultRegisterRole, enqueueCommand }));
 
 async function runAgenticCommand(meta) {
   const command = String(meta.command || '');

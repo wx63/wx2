@@ -30,8 +30,9 @@ function clearLoginFailures(key) {
   return clearLoginFailuresDb(key);
 }
 
-function createAuthRouter({ allowPublicRegister }) {
+function createAuthRouter({ allowPublicRegister, defaultRegisterRole = 'viewer' }) {
   const router = express.Router();
+  const registerRole = ['viewer', 'operator', 'admin'].includes(defaultRegisterRole) ? defaultRegisterRole : 'viewer';
 
   function safeUserResponse(req) {
     return req.user ? { ok: true, user: req.user } : { ok: false, error: '请先登录' };
@@ -46,7 +47,7 @@ function createAuthRouter({ allowPublicRegister }) {
   }
 
   router.get('/api/auth/register-status', (req, res) => {
-    res.json({ ok: true, data: { enabled: allowPublicRegister, defaultRole: 'viewer' } });
+    res.json({ ok: true, data: { enabled: allowPublicRegister, defaultRole: registerRole } });
   });
 
   router.post('/api/auth/register', registerLimiter, (req, res) => {
@@ -83,7 +84,7 @@ function createAuthRouter({ allowPublicRegister }) {
         email: normalizedEmail,
         name: String(name || '').trim().slice(0, 80) || normalizedEmail.split('@')[0],
         passwordHash: bcrypt.hashSync(passwordString, 12),
-        role: 'viewer',
+        role: registerRole,
       });
     } catch (e) {
       if (String(e && e.message || '').includes('UNIQUE')) {
@@ -93,7 +94,7 @@ function createAuthRouter({ allowPublicRegister }) {
       throw e;
     }
 
-    audit(req, 'register', 'user', String(user.id), { role: 'viewer' });
+    audit(req, 'register', 'user', String(user.id), { role: registerRole });
     loginSession(req, user, (err) => {
       if (err) {
         return res.status(201).json({ ok: true, user: toSafeUser(user), message: '账号已创建，请登录' });

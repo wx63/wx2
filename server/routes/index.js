@@ -11,9 +11,9 @@ const integrationsRouter = require('./integrations');
 const { createAgentRunsRouter } = require('./agent-runs');
 const approvalsRouter = require('./approvals');
 
-function createApiRouter({ allowPublicRegister, enqueueCommand }) {
+function createApiRouter({ allowPublicRegister, defaultRegisterRole = 'viewer', enqueueCommand }) {
   const router = express.Router();
-  router.use(createAuthRouter({ allowPublicRegister }));
+  router.use(createAuthRouter({ allowPublicRegister, defaultRegisterRole }));
   router.use('/api', requireAuth);
   router.use(healthRouter);
   router.use(metaRouter);
