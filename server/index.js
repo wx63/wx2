@@ -85,6 +85,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 const allowPublicRegister = process.env.ALLOW_REGISTER === 'true' || (process.env.NODE_ENV !== 'production' && process.env.ALLOW_REGISTER !== 'false');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const SESSION_SECRET = process.env.SESSION_SECRET || (isProduction ? '' : 'dev-only-change-me');
+const sessionCookieSecure = process.env.SESSION_COOKIE_SECURE === 'true' ? true : process.env.SESSION_COOKIE_SECURE === 'false' ? false : 'auto';
 
 if (isProduction && (!SESSION_SECRET || SESSION_SECRET === 'replace-me' || SESSION_SECRET === 'dev-only-change-me')) {
   throw new Error('生产环境必须设置强 SESSION_SECRET，且不能使用 replace-me');
@@ -175,7 +176,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: isProduction,
+    secure: sessionCookieSecure,
     maxAge: 24 * 60 * 60 * 1000,
   },
 }));
