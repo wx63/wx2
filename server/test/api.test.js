@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const crypto = require('node:crypto');
 
 process.env.NODE_ENV = 'test';
 process.env.PORT = '0';
@@ -96,6 +97,33 @@ test('login and session cookie', async () => {
   const me = await f('/api/auth/me');
   assert.equal(me.status, 200);
   assert.equal((await me.json()).user.email, 'admin@example.com');
+});
+
+test('password reset endpoint changes password with valid token', async () => {
+  const email = 'reset-flow@example.com';
+  dbmod.createUser({ email, name: 'Reset Flow', passwordHash: bcrypt.hashSync('old-password-123', 12), role: 'operator' });
+  const token = 'reset-token-' + Date.now();
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+  dbmod.createPasswordReset({ email, tokenHash: hash, expiresAt: Date.now() + 30 * 60 * 1000 });
+
+  const reset = await fetch(ctx.base + '/api/auth/reset-password', jsonReq('POST', {
+    token,
+    password: 'new-password-123',
+    confirmPassword: 'new-password-123',
+  }));
+  assert.equal(reset.status, 200);
+
+  const oldLogin = await fetch(ctx.base + '/api/auth/login', jsonReq('POST', { email, password: 'old-password-123' }));
+  assert.equal(oldLogin.status, 401);
+  const newLogin = await fetch(ctx.base + '/api/auth/login', jsonReq('POST', { email, password: 'new-password-123' }));
+  assert.equal(newLogin.status, 200);
+
+  const reuse = await fetch(ctx.base + '/api/auth/reset-password', jsonReq('POST', {
+    token,
+    password: 'another-password-123',
+    confirmPassword: 'another-password-123',
+  }));
+  assert.equal(reuse.status, 400);
 });
 
 test('public registration creates least-privilege viewer session', async () => {

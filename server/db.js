@@ -64,6 +64,16 @@ db.exec(`
     updated_at  TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS password_resets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    email       TEXT NOT NULL,
+    token_hash  TEXT NOT NULL UNIQUE,
+    expires_at  INTEGER NOT NULL,
+    used_at     TEXT,
+    created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_password_resets_email ON password_resets(email);
+
   CREATE TABLE IF NOT EXISTS audit_logs (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        INTEGER,
@@ -433,6 +443,31 @@ function isLoginLocked(key) {
 
 function clearLoginFailures(key) {
   db.prepare('DELETE FROM login_attempts WHERE key = ?').run(String(key || ''));
+}
+
+function createPasswordReset({ email, tokenHash, expiresAt }) {
+  const normalizedEmail = String(email || '').toLowerCase().trim();
+  db.prepare('DELETE FROM password_resets WHERE email = ?').run(normalizedEmail);
+  db.prepare('INSERT INTO password_resets (email, token_hash, expires_at) VALUES (?, ?, ?)')
+    .run(normalizedEmail, String(tokenHash || ''), Number(expiresAt || 0));
+  return db.prepare('SELECT * FROM password_resets WHERE email = ? ORDER BY id DESC LIMIT 1').get(normalizedEmail);
+}
+
+function findPasswordResetByTokenHash(tokenHash) {
+  const row = db.prepare('SELECT * FROM password_resets WHERE token_hash = ?').get(String(tokenHash || ''));
+  if (!row) return null;
+  if (row.used_at || Number(row.expires_at) <= Date.now()) return null;
+  return row;
+}
+
+function markPasswordResetUsed(id) {
+  db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ?').run(nowIso(), Number(id));
+}
+
+function updateUserPassword(userId, passwordHash) {
+  const ts = nowIso();
+  db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(String(passwordHash), ts, Number(userId));
+  return findUserById(Number(userId));
 }
 
 function logAudit({ userId, action, entityType, entityId, ip, userAgent, metadata }) {
@@ -1203,6 +1238,10 @@ module.exports = {
   recordLoginFailure,
   isLoginLocked,
   clearLoginFailures,
+  createPasswordReset,
+  findPasswordResetByTokenHash,
+  markPasswordResetUsed,
+  updateUserPassword,
   logAudit,
   logCommand,
   createCommandJob,
