@@ -766,17 +766,26 @@ function updateOnlineCount() {
 //  用户信息与登出
 // ================================================================
 let currentUser = null;
+function redirectToLogin() {
+  if (typeof window.__redirectToLogin === "function") return window.__redirectToLogin();
+  window.location.assign("/login.html");
+}
+
 async function loadUser() {
   try {
     const data = await apiJson("/api/auth/me");
+    if (!data.ok || !data.user) {
+      redirectToLogin();
+      return null;
+    }
     currentUser = data.user;
     const name = currentUser.name || currentUser.email.split("@")[0];
     document.getElementById("userName").textContent = name;
     document.getElementById("userAvatar").textContent = name.charAt(0).toUpperCase();
     return currentUser;
   } catch (e) {
-    if (e.message === "请先登录" || String(e.message).includes("401")) {
-      window.location.href = "/login.html";
+    if (e.message === "请先登录" || String(e.message).includes("401") || String(e.message).includes("403")) {
+      redirectToLogin();
       return null;
     }
     showToast("获取用户信息失败：" + e.message);

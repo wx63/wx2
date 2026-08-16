@@ -178,6 +178,31 @@ function makeDom() {
   return dom;
 }
 
+function makeUnauthDom() {
+  const dom = new JSDOM(html, {
+    url: 'http://localhost:3001/',
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+  });
+  const { window } = dom;
+  window.TextDecoder = TextDecoder;
+  window.TextEncoder = TextEncoder;
+  window.confirm = () => true;
+  window.__redirectToLogin = () => {
+    window.__redirectedTo = '/login.html';
+  };
+  window.fetch = async (url) => {
+    if (String(url) === '/api/auth/me') {
+      return jsonResponse({ ok: false, error: '请先登录' }, 401);
+    }
+    return jsonResponse({ ok: false, error: 'not mocked: ' + url }, 404);
+  };
+  const script = window.document.createElement('script');
+  script.textContent = appJs;
+  window.document.body.appendChild(script);
+  return dom;
+}
+
 async function waitFor(fn, timeout = 4000) {
   const startedAt = Date.now();
   let lastError;
@@ -199,6 +224,15 @@ test('frontend bootstrap renders KPI and five agent cards', async () => {
     await waitFor(() => dom.window.document.querySelectorAll('.agent-card').length === 5);
     assert.equal(dom.window.document.querySelectorAll('.kpi').length, 4);
     assert.ok(dom.window.document.querySelector('#pageTitle').textContent.includes('运营总览'));
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('frontend unauthenticated root redirects to login', async () => {
+  const dom = makeUnauthDom();
+  try {
+    await waitFor(() => dom.window.__redirectedTo === '/login.html');
   } finally {
     dom.window.close();
   }
