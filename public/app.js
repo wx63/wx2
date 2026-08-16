@@ -1850,6 +1850,32 @@ async function loadApprovalsFromServer() {
   }
 }
 
+function startRealtimeEvents() {
+  if (typeof EventSource === "undefined") return;
+  const source = new EventSource(`${API_BASE}/api/events`);
+  source.addEventListener("activity", (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      if (event && event.text) pushFeed(event.tag || "系统", event.color || "#6366f1", event.text);
+    } catch (_) {}
+  });
+  source.addEventListener("approval", (e) => {
+    try {
+      const approval = JSON.parse(e.data);
+      if (approval) mergeRealApproval(approval);
+    } catch (_) {}
+  });
+  source.addEventListener("command", (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      if (event && event.status === "ok" && event.approvalId) {
+        loadApprovalsFromServer();
+      }
+    } catch (_) {}
+  });
+  source.onerror = () => {};
+}
+
 // \u771F\u5B9E\u6267\u884C runCommand\uFF1A\u5C55\u793A\u540E\u7AEF Agent \u7F16\u6392\u6B65\u9AA4\uFF0C\u4E0D\u518D\u4F7F\u7528\u524D\u7AEF\u6A21\u62DF\u6B65\u9AA4
 async function runCommand(cmd, opts = {}) {
   const { agentIdx: presetAgent, tag: presetTag, color: presetColor } = opts;
@@ -2019,6 +2045,7 @@ async function bootstrap() {
   loadOrdersFromServer();
   await loadApprovalsFromServer();
   await loadKBFilesFromServer();
+  startRealtimeEvents();
 }
 bootstrap();
 // 每 30s 轮询一次审批数据，保证多端同步 & 徽标新鲜
