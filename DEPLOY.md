@@ -3,6 +3,16 @@
 > OpenClaw 收到“部署上服务器 / 更新远程 / 上线”时，先读本文件。
 > 本手册只做**代码更新**，不覆盖服务器 `data/` 和 `.env`。
 
+## 0. 用户发给 OpenClaw 的执行指令（可直接复制）
+
+> 请读取项目根目录 `E:\基于OpenClaw构建跨境电商智能体\基于OpenClaw构建跨境电商智能体\DEPLOY.md`，并严格按文档执行部署。
+> 目标服务器：106.55.18.244:3001。
+> 先执行 `pm2 describe ecommerce-agent` 确认实际部署目录；如果目录不是 `~/app`，自动换成实际目录。
+> 将 `deploy\ecommerce-agent-update-latest.zip` 上传到服务器后解压覆盖到实际部署目录。
+> 执行 `cd <实际目录>/server && npm install`，然后 `pm2 restart ecommerce-agent --update-env && pm2 save`。
+> 绝对不要覆盖服务器的 `.env` 和 `data/`。
+> 完成后按文档第 5 节验证，并报告远程 `app.js` 是否已出现 `redirectToLogin`。
+
 ## 1. 本次目标
 
 - 服务器：`http://106.55.18.244:3001`
