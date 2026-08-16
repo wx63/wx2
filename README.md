@@ -44,7 +44,14 @@ npm run test:frontend
 ```
 public/           # 前端控制台静态资产（唯一对外静态目录）
 server/
-  index.js        # Express：API 路由 + 认证/鉴权 + 受限静态托管
+  index.js        # Express 启动、会话、安全中间件、受限静态托管
+  routes/         # API 按域拆分：auth/meta/business/kb/commands/approvals/...
+  tools/          # Agent 工具注册表（price_lookup/kb_search/listing/compliance/...）
+  planner.js      # 本地 Agent 路由与任务规划
+  scheduler.js    # 精确日调度：日报/备份，不依赖 setInterval 分钟漂移
+  events.js       # 进程内事件总线 + /api/events SSE 出口
+  executors/      # 审批执行器适配器注册表（官方 API 接入前为占位）
+  request-logger.js # 请求日志与慢请求审计
   bridge.js       # 模型桥接：快路径直连 provider -> 慢路径 Gateway 兜底
   kb.js           # 知识库 RAG：.md/.txt 分块检索 + 带来源引用答复
 data/             # SQLite 运行时数据库（账号/审批/线索/报告/设置/审计）
@@ -61,10 +68,10 @@ skills/           # 自定义技能（SKILL.md）
 1. 运营总监路由：按指令关键词选择数字员工
 2. 任务拆解：生成 `agent_runs` + `agent_steps`
 3. 工具调用：知识库检索 / 客服答复 / Listing / 本地化 / 合规审查 / 线索打标 / 运营报告
-4. 真实状态：前端轮询命令详情，展示后端落库的执行步骤
+4. 真实状态：命令详情支持轮询；审批/活动/命令状态通过 `/api/events` SSE 实时推送，前端保留 30s 轮询兜底
 5. 审批闸门：对外动作仍生成草稿，等待人工确认后归档
 
-当前工具均为本地能力，不真实调用微信 / WhatsApp / Instagram / X / ERP 等外部平台。
+当前工具均为本地能力，不真实调用微信 / WhatsApp / Instagram / X / ERP 等外部平台；`server/executors/` 已预留统一适配器接口，等平台官方 API 凭据就绪后接入。
 ## 配置
 
 所有配置走环境变量（见 .env.example）。常用：

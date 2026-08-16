@@ -211,3 +211,14 @@
 5. 按 docs / server / frontend 分组提交；推送 `git push origin master:main`
 6. 在 `memory/YYYY-MM-DD.md` 记录本次改动、验证结果与踩坑
 7. 最终答复中列明：每项完成状态、验证结果、以及任何「⚠️ 需人工」事项（如密钥轮换）
+
+---
+
+## 8. 2026-08-16 P2 完成状态
+
+- R1：已完成。`server/routes/` 按域拆分，行为不变，测试全绿。
+- R2：已完成。`server/tools/` 独立注册表 + `planner.js`，工具提示词与 `runPlannedStep` 独立。
+- R3：已完成。`server/scheduler.js` 精确排程，不再依赖 `setInterval` 分钟漂移。
+- R4：已完成。`/api/events` SSE + 前端 `EventSource`，保留 30s 轮询兜底。
+- R5：已完成。`server/executors/` 统一 adapter 注册表，当前仍只归档不真执行。
+- R6：已完成。`server/request-logger.js` 请求/慢请求审计，命令级 `slow_command` 观测。
