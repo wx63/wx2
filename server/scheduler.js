@@ -26,6 +26,66 @@ function startScheduler({ now = () => new Date(), onSchedule } = {}) {
   let lastDigestKey = null;
   let lastBackupKey = null;
   let failures = 0;
+  const reminderEnabled = process.env.APPROVAL_REMINDER_ENABLED !== 'false';
+  const reminderInterval = Math.max(60 * 1000, Number(process.env.APPROVAL_REMINDER_INTERVAL_MS) || 5 * 60 * 1000);
+  let reminderTimer = null;
+
+  async function runApprovalReminder() {
+    const { listPendingApprovalsUnnotified, markApprovalNotified } = require('./db');
+    const { executeApproval } = require('./executors');
+    const pending = listPendingApprovalsUnnotified(20);
+    if (!pending.length) return;
+
+    let notified = 0;
+    let failed = 0;
+    const nowIso = new Date().toISOString();
+
+    for (const ap of pending) {
+      const text = [
+        `【审批提醒】${ap.title || '未命名审批'}`,
+        `单号: ${ap.id}`,
+        `动作: ${ap.action || '-'}`,
+        `提交时间: ${ap.created_at || '-'}`,
+        '请到控制台处理：http://106.55.18.244:3001',
+      ].join('\n');
+
+      let feishuOk = false;
+      let emailOk = false;
+
+      if (alertChatId) {
+        try {
+          await feishu.sendText(alertChatId, text);
+          feishuOk = true;
+        } catch (e) {
+          console.error('[reminder] feishu fail:', e.message);
+        }
+      }
+
+      try {
+        const r = await executeApproval({ id: ap.id, action: 'notify', title: `审批待处理：${ap.title}`, content: text });
+        if (r.executed) emailOk = true;
+        else console.error('[reminder] email fail:', r.reason);
+      } catch (e) {
+        console.error('[reminder] email err:', e.message);
+      }
+
+      if (feishuOk || emailOk) {
+        markApprovalNotified(ap.id, nowIso);
+        notified += 1;
+      } else {
+        failed += 1;
+      }
+    }
+
+    console.log(`[reminder] scanned ${pending.length}, notified ${notified}, failed ${failed}`);
+  }
+
+  function startReminderLoop() {
+    if (!reminderEnabled) return;
+    reminderTimer = setInterval(() => runApprovalReminder().catch(e => console.error('[reminder] loop error:', e)), reminderInterval);
+    if (reminderTimer.unref) reminderTimer.unref();
+    setTimeout(() => runApprovalReminder().catch(e => console.error('[reminder] first run error:', e)), 30 * 1000);
+  }
 
   function scheduleNext() {
     if (!targetMinutes.length) return;
@@ -74,10 +134,12 @@ function startScheduler({ now = () => new Date(), onSchedule } = {}) {
   }
 
   scheduleNext();
+  startReminderLoop();
   console.log('[scheduler] started, next run scheduled');
   return {
     stop() {
       clearTimeout(timer);
+      clearInterval(reminderTimer);
     },
   };
 }

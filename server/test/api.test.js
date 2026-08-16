@@ -584,6 +584,18 @@ test('approval persistence includes confidence and needs review', () => {
   assert.equal(ap.needsReview, true);
 });
 
+test('approval reminder only lists pending unnotified approvals', () => {
+  const pending = dbmod.createApproval({ title: '待提醒审批', command: '发帖', action: 'social_post', draft: '草稿', risk: '测试', createdBy: 1 });
+  const alreadyNotified = dbmod.createApproval({ title: '已提醒审批', command: '上架', action: 'listing_submit', draft: '草稿', risk: '测试', createdBy: 1 });
+  dbmod.markApprovalNotified(alreadyNotified.id, new Date().toISOString());
+  dbmod.decideApproval({ id: pending.id, decision: 'approve', userId: 1 });
+  dbmod.markApprovalNotified(pending.id, new Date().toISOString());
+
+  const list = dbmod.listPendingApprovalsUnnotified(20);
+  assert.ok(!list.some(a => a.id === pending.id));
+  assert.ok(!list.some(a => a.id === alreadyNotified.id));
+});
+
 test('approval executor registry exposes adapters and remains archive-only', async () => {
   const admin = await loginAs('admin@example.com');
   const ap = dbmod.createApproval({ title: '执行器注册测试', command: '发帖', action: 'social_post', draft: '草稿', risk: '测试', createdBy: 1 });

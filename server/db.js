@@ -134,6 +134,7 @@ db.exec(`
     FOREIGN KEY(created_by) REFERENCES users(id),
     FOREIGN KEY(decided_by) REFERENCES users(id)
   );
+
   CREATE INDEX IF NOT EXISTS idx_approvals_created ON approvals(created_at);
   CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 
@@ -289,6 +290,12 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_agent_steps_run ON agent_steps(run_id);
 `);
+
+// 幂等迁移：审批提醒标记列
+const approvalCols = db.prepare("PRAGMA table_info(approvals)").all();
+if (!approvalCols.some(c => c.name === 'notified_at')) {
+  db.exec("ALTER TABLE approvals ADD COLUMN notified_at TEXT");
+}
 
 addColumnIfMissing('commands', 'user_id', 'INTEGER');
 addColumnIfMissing('commands', 'content', 'TEXT');
@@ -867,6 +874,16 @@ function decideApproval({ id, decision, userId }) {
   return approval;
 }
 
+function listPendingApprovalsUnnotified(limit = 20) {
+  return db.prepare(
+    "SELECT * FROM approvals WHERE status = 'pending' AND (notified_at IS NULL OR notified_at = '') ORDER BY created_at ASC LIMIT ?"
+  ).all(limit);
+}
+
+function markApprovalNotified(id, notifiedAt) {
+  return db.prepare("UPDATE approvals SET notified_at = ? WHERE id = ?").run(notifiedAt || nowIso(), id);
+}
+
 function migrateApprovalsFromJson(filePath) {
   if (!fs.existsSync(filePath)) return 0;
   const count = Number(db.prepare('SELECT COUNT(*) AS n FROM approvals').get().n);
@@ -1254,6 +1271,8 @@ module.exports = {
   getApproval,
   listApprovals,
   decideApproval,
+  listPendingApprovalsUnnotified,
+  markApprovalNotified,
   migrateApprovalsFromJson,
   listAgents,
   updateAgentStatus,
