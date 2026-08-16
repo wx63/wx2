@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>重置密码 · OpenClaw 跨境全能运营矩阵</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="login.css" />
+</head>
+<body class="auth-body">
+  <div class="auth">
+    <section class="auth-brand">
+      <div class="brand-bg-grid"></div>
+      <div class="brand-bg-glow"></div>
+      <div class="brand-top">
+        <div class="brand-logo">🦞</div>
+        <span class="brand-name">OpenClaw</span>
+      </div>
+      <div class="brand-content">
+        <h1 class="brand-headline">重置密码</h1>
+        <p class="brand-sub">设置新密码后，返回登录页重新登录。</p>
+      </div>
+    </section>
+    <section class="auth-form-wrap">
+      <div class="auth-form">
+        <form id="resetForm" novalidate>
+          <h2 class="form-title">设置新密码</h2>
+          <p class="form-sub">密码至少 8 位。</p>
+
+          <label class="field">
+            <span class="field-label">新密码</span>
+            <div class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              <input type="password" name="password" placeholder="至少 8 位" autocomplete="new-password" required />
+            </div>
+            <span class="field-error"></span>
+          </label>
+
+          <label class="field">
+            <span class="field-label">确认新密码</span>
+            <div class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="m9 16 2 2 4-4"/></svg>
+              <input type="password" name="confirmPassword" placeholder="再次输入新密码" autocomplete="new-password" required />
+            </div>
+            <span class="field-error"></span>
+          </label>
+
+          <button type="submit" class="btn-primary btn-block">重置密码</button>
+          <a class="btn-primary btn-block" href="/login.html" style="display:block;text-align:center;background:var(--bg-3);color:var(--text-2);text-decoration:none">返回登录</a>
+        </form>
+      </div>
+    </section>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="reset.js"></script>
+</body>
+</html>

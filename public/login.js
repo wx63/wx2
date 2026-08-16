@@ -20,6 +20,28 @@ authTabs.forEach((tab) => {
   });
 });
 
+function showForgotPanel(show) {
+  const tabs = document.querySelector(".auth-tabs");
+  const loginPanel = document.getElementById("loginForm");
+  const forgotPanel = document.getElementById("forgotForm");
+  const registerPanel = document.getElementById("registerForm");
+  if (tabs) tabs.style.display = show ? "none" : "";
+  if (loginPanel) loginPanel.classList.toggle("active", !show);
+  if (forgotPanel) forgotPanel.classList.toggle("active", show);
+  if (registerPanel && !show) registerPanel.classList.toggle("active", false);
+  authTabs.forEach((tab) => tab.classList.toggle("active", !show && tab.dataset.mode === "login"));
+}
+
+document.getElementById("forgotLink")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  showForgotPanel(true);
+});
+
+document.getElementById("forgotBack")?.addEventListener("click", () => {
+  showForgotPanel(false);
+  positionUnderline();
+});
+
 positionUnderline();
 
 // ============ 密码显示切换 ============
@@ -118,6 +140,28 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
   }
 });
 
+document.getElementById("forgotForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const email = form.email.value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showError(form.email.closest(".field"), "邮箱格式不正确");
+    return;
+  }
+  const btn = form.querySelector("button[type=submit]");
+  const reset = setSubmitting(btn, "发送中…");
+  try {
+    await postAuth("/api/auth/forgot-password", { email });
+    showToast("如果该邮箱已注册，重置邮件已发送");
+    form.reset();
+    showForgotPanel(false);
+    positionUnderline();
+  } catch (err) {
+    reset();
+    showToast(err.message || "发送失败");
+  }
+});
+
 document.getElementById("registerForm")?.addEventListener("submit", async (e) => {
   e.preventDefault();
   const form = e.target;
@@ -144,7 +188,16 @@ document.getElementById("registerForm")?.addEventListener("submit", async (e) =>
     const resp = await fetch("/api/auth/register-status");
     const data = await resp.json().catch(() => ({}));
     const enabled = resp.ok && data.ok && data.data && data.data.enabled;
-    if (enabled) return;
+    if (enabled) {
+      const note = document.querySelector("#registerForm .auth-note");
+      if (note) {
+        const role = data.data && data.data.defaultRole;
+        note.textContent = role === "operator"
+          ? "公开注册已开启，新账号默认可执行运营指令。"
+          : "公开注册已开启，新账号默认只读权限。";
+      }
+      return;
+    }
 
     const registerTab = document.querySelector("[data-mode=register]");
     const registerForm = document.getElementById("registerForm");
