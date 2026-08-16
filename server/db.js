@@ -729,7 +729,7 @@ function updateAgentStep(runId, seq, r) {
 function finishAgentRun(runId, r) {
   const ts = nowIso();
   db.prepare(`UPDATE agent_runs SET
-    status = @status,
+    status = CASE WHEN status = 'cancelled' THEN 'cancelled' ELSE @status END,
     model = @model,
     path = @path,
     duration_ms = @durationMs,
