@@ -30,6 +30,8 @@ fs.mkdirSync(process.env.OPENCLAW_KB_DIR, { recursive: true });
 
 const app = require('../index');
 const bridge = require('../bridge');
+const dbmod = require('../db');
+const bcrypt = require('bcryptjs');
 
 const BASE = `http://127.0.0.1:${process.env.PORT}`;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -39,12 +41,14 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 function createMockModelServer() {
   const held = [];
   let holdNext = false;
+  const requests = [];
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', c => { body += c; });
     req.on('end', () => {
       try {
         const parsed = JSON.parse(body || '{}');
+        requests.push(parsed);
         const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0;
         const hasToolResults = Array.isArray(parsed.messages) && parsed.messages.some(m => m.role === 'tool');
         let payload;
@@ -70,6 +74,8 @@ function createMockModelServer() {
   });
   return {
     server,
+    requests,
+    clearRequests: () => { requests.length = 0; },
     start: () => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port))),
     close: () => new Promise(r => {
       releaseHeld();
@@ -325,6 +331,72 @@ test('指令（流式 SSE）→ accepted/complete/done 事件', async () => {
   const complete = events.find(e => e.event === 'complete');
   assert.equal(complete.data.status, 'ok');
   assert.ok(complete.data.commandId > 0);
+});
+
+test('多轮指令上下文：第二条指令携带第一条指令结果', async () => {
+  const firstCommand = '分析竞品A市场份额 ' + Date.now();
+  const secondCommand = '参考刚才的分析给出下一步建议 ' + (Date.now() + 1);
+  mockModel.clearRequests();
+
+  const first = await admin.json('/api/command', { method: 'POST', body: { command: firstCommand } });
+  assert.equal(first.resp.status, 202);
+  await pollCommand(first.body.commandId);
+
+  assert.ok(
+    mockModel.requests.some(r => String((r.messages || []).find(m => m.role === 'user')?.content || '').includes(firstCommand)),
+    '第一条指令应发送给 mock 模型'
+  );
+
+  mockModel.clearRequests();
+  const second = await admin.json('/api/command', { method: 'POST', body: { command: secondCommand } });
+  assert.equal(second.resp.status, 202);
+  await pollCommand(second.body.commandId);
+
+  const withHistory = mockModel.requests.find(r => {
+    const content = String((r.messages || []).find(m => m.role === 'user')?.content || '');
+    return content.includes('对话历史') && content.includes(firstCommand) && content.includes('最终产出（mock）') && content.includes(secondCommand);
+  });
+  assert.ok(withHistory, '第二条指令 prompt 应包含第一条指令及结果摘要');
+});
+
+test('多轮指令上下文：不同用户/会话互不串历史', async () => {
+  const markerA = '会话A独有指令 ' + Date.now();
+  const markerB = '会话B独有指令 ' + (Date.now() + 1);
+  mockModel.clearRequests();
+
+  const first = await admin.json('/api/command', { method: 'POST', body: { command: markerA } });
+  assert.equal(first.resp.status, 202);
+  await pollCommand(first.body.commandId);
+
+  const otherEmail = 'history-other-' + Date.now() + '@e2e.local';
+  dbmod.createUser({
+    email: otherEmail,
+    name: 'History Other',
+    passwordHash: bcrypt.hashSync('history-pass-123', 12),
+    role: 'admin',
+  });
+  const otherAdmin = new Session();
+  const login = await otherAdmin.json('/api/auth/login', {
+    method: 'POST',
+    body: { email: otherEmail, password: 'history-pass-123' },
+  });
+  assert.equal(login.resp.status, 200);
+
+  mockModel.clearRequests();
+  const second = await otherAdmin.json('/api/command', { method: 'POST', body: { command: markerB } });
+  assert.equal(second.resp.status, 202);
+  const done = await pollCommand(second.body.commandId);
+  assert.equal(done.status, 'ok');
+
+  const bodies = mockModel.requests.filter(r => {
+    const content = String((r.messages || []).find(m => m.role === 'user')?.content || '');
+    return content.includes(markerB);
+  });
+  assert.ok(bodies.length > 0, '其他用户指令应发送给 mock 模型');
+  for (const r of bodies) {
+    const content = String((r.messages || []).find(m => m.role === 'user')?.content || '');
+    assert.equal(content.includes(markerA), false, '其他用户指令不应携带会话 A 历史');
+  }
 });
 
 test('对外动作指令 → 生成审批草稿（批准只归档，不真实执行）', async () => {

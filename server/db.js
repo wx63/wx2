@@ -627,6 +627,21 @@ function recoverInterruptedCommands() {
 function recentCommands(limit = 50) {
   return db.prepare('SELECT * FROM commands ORDER BY id DESC LIMIT ?').all(limit).map(commandRow);
 }
+
+function listRecentCommands({ userId, sessionId, limit = 5, excludeId } = {}) {
+  const clauses = [];
+  const params = {};
+  if (userId != null) { clauses.push('user_id = @userId'); params.userId = userId; }
+  if (sessionId) { clauses.push('session_id = @sessionId'); params.sessionId = sessionId; }
+  if (excludeId != null) { clauses.push('id != @excludeId'); params.excludeId = excludeId; }
+  clauses.push("status = 'ok'");
+  clauses.push("content IS NOT NULL AND content != ''");
+  const where = clauses.length ? ' WHERE ' + clauses.join(' AND ') : '';
+  const safeLimit = Math.max(1, Math.min(50, Number(limit) || 5));
+  return db.prepare(
+    `SELECT id, command, content FROM commands ${where} ORDER BY id DESC LIMIT @limit`
+  ).all({ ...params, limit: safeLimit });
+}
 function agentStepRow(row) {
   if (!row) return null;
   return {
@@ -1291,6 +1306,7 @@ module.exports = {
   finishCommandJob,
   recoverInterruptedCommands,
   recentCommands,
+  listRecentCommands,
   createApproval,
   getApproval,
   listApprovals,

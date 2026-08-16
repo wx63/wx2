@@ -46,6 +46,7 @@ const {
   finishCommandJob,
   recoverInterruptedCommands,
   recentCommands,
+  listRecentCommands,
   listAgentRuns,
   markAgentRunCancelled,
   listCommandJobs,
@@ -311,6 +312,26 @@ app.use(createRequestLogger({ logAudit }));
 app.use(sameOriginWriteGuard);
 app.use(createApiRouter({ allowPublicRegister, defaultRegisterRole, enqueueCommand }));
 
+function buildConversationHistory(meta) {
+  try {
+    const recent = listRecentCommands({
+      userId: meta.userId,
+      sessionId: meta.sessionId,
+      limit: 5,
+      excludeId: meta.commandId,
+    });
+    if (!recent.length) return '';
+    const lines = recent.reverse().map((c, i) => {
+      const content = String(c.content || '').slice(0, 400);
+      return `[${i + 1}] 用户：${String(c.command || '').slice(0, 200)}\n    助手：${content}`;
+    });
+    return '对话历史（来自之前的指令）：\n' + lines.join('\n\n');
+  } catch (e) {
+    console.warn('[history] build failed:', e.message);
+    return '';
+  }
+}
+
 async function runAgenticCommand(meta) {
   const command = String(meta.command || '');
   const runId = meta.runId;
@@ -318,7 +339,8 @@ async function runAgenticCommand(meta) {
   const stats = { steps: 0, tools: 0, retries: 0, failedSteps: 0 };
   const kbContext = agenticPreloadContext(command);
   const priceHint = isPriceLookupCommand(command) ? '\n\n[工具提示] 这是实时价格查询，请调用 price_lookup 工具，不要只凭模型记忆回答。\n' : '';
-  const prompt = `${command}\n\n${kbContext ? '知识库上下文：\n' + kbContext + '\n\n' : ''}${priceHint}`.trim();
+  const history = buildConversationHistory(meta);
+  const prompt = `${history ? history + '\n\n' : ''}${command}\n\n${kbContext ? '知识库上下文：\n' + kbContext + '\n\n' : ''}${priceHint}`.trim();
   const maxRounds = Math.max(1, Math.min(12, Number(process.env.AGENT_MAX_ROUNDS || 8)));
   const result = await runAgentTools(prompt, TOOL_SCHEMAS, {
     maxRounds,

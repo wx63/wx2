@@ -573,6 +573,34 @@ test('agentic all-tools-failed falls back to rules pipeline', async () => {
     assert.ok(result.runId > 0);
   }, { toolCalls: [MOCK_RESEARCH_CALL], failPlain: true });
 });
+
+test('listRecentCommands filters completed commands and respects limit/exclude', () => {
+  const sessionId = 'history-limit-' + Date.now();
+  const ids = [];
+  for (let i = 1; i <= 6; i += 1) {
+    ids.push(dbmod.logCommand({
+      userId: 1,
+      command: `history-${i}`,
+      agentId: 'main',
+      sessionId,
+      status: 'ok',
+      content: `result-${i}`,
+      durationMs: 1,
+    }));
+  }
+  dbmod.logCommand({ userId: 1, command: 'history-queued', agentId: 'main', sessionId, status: 'queued', content: null });
+  dbmod.logCommand({ userId: 2, command: 'history-other-user', agentId: 'main', sessionId, status: 'ok', content: 'other' });
+  dbmod.logCommand({ userId: 1, command: 'history-other-session', agentId: 'main', sessionId: sessionId + '-other', status: 'ok', content: 'other' });
+
+  const rows = dbmod.listRecentCommands({ userId: 1, sessionId, limit: 5, excludeId: ids[5] });
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows.map(r => r.command).reverse(), ['history-1', 'history-2', 'history-3', 'history-4', 'history-5']);
+  assert.equal(rows.some(r => r.id === ids[5]), false);
+  assert.equal(rows.some(r => r.command === 'history-queued'), false);
+  assert.equal(rows.some(r => r.command === 'history-other-user'), false);
+  assert.equal(rows.some(r => r.command === 'history-other-session'), false);
+});
+
 test('production security guard warns on insecure public registration', () => {
   const warnings = [];
   const message = app.checkProductionSecurity({ isProduction: true, allowPublicRegister: true, onWarn: (m) => warnings.push(m) });
