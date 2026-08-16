@@ -135,7 +135,7 @@ if (allowedOrigins.length) {
   }));
 }
 
-app.use(helmet({ contentSecurityPolicy: { useDefaults: true, directives: { 'script-src': ["'self'"], 'style-src': ["'self'", "'unsafe-inline'"], 'img-src': ["'self'", 'data:'], 'connect-src': ["'self'"], 'frame-ancestors': ["'none'"] } } }));
+app.use(helmet({ contentSecurityPolicy: { useDefaults: true, directives: { 'upgrade-insecure-requests': null, 'script-src': ["'self'"], 'style-src': ["'self'", "'unsafe-inline'"], 'img-src': ["'self'", 'data:'], 'connect-src': ["'self'"], 'frame-ancestors': ["'none'"] } } }));
 app.use(express.json({ limit: '2mb' }));
 
 class SQLiteSessionStore extends session.Store {
