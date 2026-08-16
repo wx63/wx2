@@ -219,7 +219,32 @@ function requireRole(...roles) {
   };
 }
 
+
+// 机器身份认证：Authorization: Bearer <API_TOKEN> 或 X-API-Token 头
+function apiTokenAuth(req, res, next) {
+  try {
+    const expected = process.env.API_TOKEN;
+    if (!expected) return next(); // 未配置则跳过（保持现状）
+    const header = req.headers['authorization'] || '';
+    const alt = req.headers['x-api-token'] || '';
+    let token = '';
+    if (header.startsWith('Bearer ')) token = header.slice(7).trim();
+    else if (alt) token = String(alt).trim();
+    if (!token) return next();
+    // 常量时间比较，防时序攻击
+    const a = Buffer.from(String(expected));
+    const b = Buffer.from(token);
+    if (a.length === b.length && require('crypto').timingSafeEqual(a, b)) {
+      req.user = { id: null, role: 'admin', name: 'api_token', source: 'api_token' };
+      req.apiToken = true;
+    }
+    next();
+  } catch (e) {
+    next();
+  }
+}
 function sameOriginWriteGuard(req, res, next) {
+  if (req.apiToken) return next(); // 机器身份跳过跨源校验
   if (!['POST', 'PATCH', 'DELETE'].includes(req.method)) return next();
   const origin = req.get('origin');
   const selfOrigin = `${req.protocol}://${req.get('host')}`;
@@ -308,6 +333,7 @@ function bootstrapAdminFromEnv() {
 bootstrapAdminFromEnv();
 
 app.use(attachUser);
+app.use(apiTokenAuth);
 app.use(createRequestLogger({ logAudit }));
 app.use(sameOriginWriteGuard);
 app.use(createApiRouter({ allowPublicRegister, defaultRegisterRole, enqueueCommand }));
